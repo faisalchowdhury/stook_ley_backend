@@ -35,17 +35,18 @@ export const registerUserService = async (data: any) => {
   if (existingUser) {
     throw new ApiError(400, "User already exist");
   }
-  const hashedPassword = await hashPassword(password);
+  let hashedPassword: string | null = null;
 
   const userPayload: any = {
     name,
     phone,
     email,
-    password: hashedPassword,
-
     isVerified: false,
   };
-
+  if (password) {
+    const hashedPassword = await hashPassword(password);
+    userPayload.password = hashedPassword;
+  }
   // if (data.file) {
   //   userPayload.profilePicture = `/images/${data.file.filename}`;
   // }

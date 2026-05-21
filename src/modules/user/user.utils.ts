@@ -107,6 +107,63 @@ export const sendOTPEmailVerification = async (
   }
 };
 
+// inform authorizer and executor email notify on assigned
+export const sendAssignedNotify = async (
+  name: string,
+  email: string,
+  role: string,
+  assignerName: string,
+): Promise<void> => {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    secure: true,
+    auth: {
+      user: Nodemailer_GMAIL,
+      pass: Nodemailer_GMAIL_PASSWORD,
+    },
+  });
+
+  const emailContent = `
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
+    <h1 style="text-align: center; color:#111111; font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
+      ${process.env.AppName}
+    </h1>
+    <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
+      <h2 style="color: #111111; text-align: center; font-size: 24px; font-weight: bold;">Hello ${name}!</h2>
+      
+      <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">
+        You have been assigned as <strong style="color: #111111;">${role}</strong> by <strong style="color: #111111;">${assignerName}</strong>.
+      </p>
+      
+     
+      
+      <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #111111; color: white; border-radius: 8px; font-size: 24px; font-weight: bold;">
+        <h3 style="margin: 0; color:#FFFFFF">Legecy Keeper link : https://legacy-keeper.com</strong></h3>
+      </div>
+      
+      <p style="text-align: center; color: #e10600; font-weight: bold; font-size: 14px; margin-top: 20px;">This OTP will expire in 3 minutes.</p>
+      <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">If you did not request this, please contact your administrator.</p>
+      <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">Regards,<br>${process.env.AppName}</p>
+    </div>
+    
+    <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">If you're having trouble copying the OTP, please try again.</p>
+  </div>
+`;
+
+  const mailOptions = {
+    from: "nodemailerapptest@gmail.com",
+    to: email,
+    subject: "Verify Your Account - OTP",
+    html: emailContent,
+  };
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    throw new ApiError(500, "Unexpected error occurred during email sending.");
+  }
+};
+
 export const getStoredOTP = async (email: string): Promise<string | null> => {
   const otpRecord = await OTPModel.findOne({ email });
   return otpRecord ? otpRecord.otp : null;

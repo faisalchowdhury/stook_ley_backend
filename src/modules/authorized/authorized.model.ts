@@ -2,6 +2,10 @@ import mongoose, { Schema } from "mongoose";
 import { IAuthorized } from "./authorized.interface";
 
 const authorizedSchema = new Schema<IAuthorized>({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+  },
   name: {
     type: String,
     required: true,
@@ -13,7 +17,11 @@ const authorizedSchema = new Schema<IAuthorized>({
   part: {
     type: String,
     required: true,
-    enum: ["authorized", "executors"],
+    enum: ["authorized", "executor"],
+  },
+  password: {
+    type: String,
+    required: true,
   },
 });
 

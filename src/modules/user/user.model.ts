@@ -11,10 +11,10 @@ const userSchema = new Schema<IUser>(
     email: { type: String, required: true, unique: true, index: true },
     address: { type: String },
 
-    password: { type: String, required: true },
+    password: { type: String, required: false },
     role: {
       type: String,
-      enum: ["admin", "user", "authorizer"],
+      enum: ["admin", "user", "executor", "authorizer"],
       default: "user",
     },
     profilePicture: { type: String, required: false },

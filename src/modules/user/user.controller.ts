@@ -42,60 +42,112 @@ import { number } from "zod";
 
 //  register User
 
-const registerUser = catchAsync(async (req: Request, res: Response) => {
-  const { name, email } = req.body;
+export const registerUser = async (data: any, res: Response) => {
+  try {
+    console.log("1. Starting registration...");
+    const { name, phone, email, password, role } = data.body;
+    console.log("2. Extracted data:", {
+      name,
+      phone,
+      email,
+      role,
+      hasPassword: !!password,
+    });
 
-  // Step 1: Register the user and get OTP
-  const { data } = await UserService.registerUserService(req);
+    const start = Date.now();
 
-  const { otp, user } = data; // user already created here
+    // Check if user already exists
+    console.log("3. Checking existing user...");
+    const existingUser = await UserModel.findOne({ email });
+    console.log("4. Existing user check complete:", !!existingUser);
 
-  const token = generateRegisterToken({ email });
-
-  (async () => {
-    try {
-      // const hashedPassword = await hashPassword(password);
-
-      // If file uploaded, update image
-
-      // Send OTP
-      // await UserService.sendPhoneVerification(email, String(otp));
-      await sendOTPEmailRegister(name, email, String(otp));
-      // Save OTP for verification
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + 60 * 1000);
-      await OTPModel.findOneAndUpdate({ email }, { otp, expiresAt });
-
-      // Emit notification
-      const notificationPayload = {
-        userId: user._id,
-        userMsgTittle: "🎉 Registration Completed",
-        adminMsgTittle: "📢 New User Registration",
-        userMsg: `Welcome to ${process.env.AppName}, ${user?.name}! 🎉`,
-        adminMsg: `New user ${user?.name} has registered on ${process.env.AppName}.`,
-      } as any;
-      await emitNotification(notificationPayload);
-
-      await saveOTP(email, String(otp));
-
-      return sendResponse(res, {
-        statusCode: httpStatus.OK,
-        success: true,
-        message:
-          "OTP sent to your email address. Please verify to continue registration.",
-        data: { token, role: "user" },
-      });
-    } catch (backgroundError: any) {
-      console.error("Error in background tasks:", backgroundError?.message);
-      return sendResponse(res, {
-        statusCode: backgroundError?.statusCode || 500,
+    if (existingUser) {
+      return res.status(400).json({
         success: false,
-        data: backgroundError?.message,
+        statusCode: 400,
+        message: "User already exists",
+        data: null,
       });
     }
-  })();
-});
 
+    // Validate password based on role
+    const userRole = role || "user";
+    console.log("5. User role:", userRole);
+
+    console.log("5a. Checking password requirement...");
+    if ((userRole === "authorizer" || userRole === "executor") && !password) {
+      console.log("5b. Password required but not provided");
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Password is required for authorizer and executor roles",
+        data: null,
+      });
+    }
+    console.log("5c. Password validation passed");
+
+    console.log("6. Building user payload...");
+    const userPayload: any = {
+      name,
+      phone,
+      email,
+      role: userRole,
+      isVerified: false,
+      password: null, // Default to null
+    };
+
+    // Only hash and save password for authorizer and executor roles
+    if ((userRole === "authorizer" || userRole === "executor") && password) {
+      console.log("7. Authorizer/Executor role - hashing password...");
+      const hashedPassword = await hashPassword(password);
+      console.log("8. Password hashed");
+      userPayload.password = hashedPassword;
+    } else {
+      console.log("7. User role - password set to null");
+    }
+
+    console.log("8. User payload created:", userPayload);
+
+    // Create new user
+    console.log("9. Creating user in database...");
+    const newUser = await UserModel.create(userPayload);
+    console.log("10. User created:", newUser._id);
+
+    // Generate and store OTP
+    console.log("11. Generating OTP...");
+    const otp = Math.floor(100000 + Math.random() * 900000);
+
+    console.log("12. Saving OTP to database...");
+    await OTPModel.create({
+      email,
+      otp: otp.toString(),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+    console.log("13. OTP saved:", otp);
+
+    const end = Date.now();
+    console.log(`14. Registration complete in ${end - start}ms`);
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message:
+        "User registered successfully. Please verify your email address.",
+      data: {
+        user: newUser,
+        otp,
+      },
+    });
+  } catch (error: any) {
+    console.error("Registration error:", error);
+    return res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: error.message || "Registration failed",
+      data: null,
+    });
+  }
+};
 const resendOTP = catchAsync(async (req: Request, res: Response) => {
   const email = req.body.email;
 
@@ -130,8 +182,7 @@ const resendOTP = catchAsync(async (req: Request, res: Response) => {
 export const loginUser = catchAsync(async (req: Request, res: Response) => {
   const { email, password, fcmToken } = req.body;
 
-  const user = await UserModel.findOne({ email });
-  console.log(email);
+  const user: any = await UserModel.findOne({ email });
   if (!user) {
     throw new ApiError(401, "This account does not exist.");
   }
@@ -167,6 +218,12 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
     return await saveOTP(email, otp);
   }
 
+  // If user role is 'user', they should use OTP login, but if they have a password set, we can allow them to login or enforce OTP.
+  // Based on instructions, users shouldn't need a password.
+  if (user.role === "user" && !user.password) {
+     throw new ApiError(403, "Please use OTP login for user account.");
+  }
+
   const isPasswordValid = await argon2.verify(
     user.password as string,
     password,
@@ -196,6 +253,82 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
   });
 
   await user.save();
+});
+
+// Passwordless Login for User
+export const userLogin = catchAsync(async (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email) {
+    throw new ApiError(400, "Please provide your email.");
+  }
+
+  const user = await UserModel.findOne({ email });
+  if (!user) {
+    throw new ApiError(404, "User not found. Please register first.");
+  }
+
+  if (user.isDeleted) {
+    throw new ApiError(404, "Your account is deleted.");
+  }
+
+  const otp = generateOTP();
+  await sendOTPEmailRegister(user.name, email, otp);
+  await saveOTP(email, otp);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "OTP sent to your email. Please check!",
+    data: null,
+  });
+});
+
+export const verifyUserOTP = catchAsync(async (req: Request, res: Response) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    throw new ApiError(400, "Email and OTP are required");
+  }
+
+  const dbOTP = await OTPModel.findOne({ email });
+  if (!dbOTP || dbOTP.otp !== otp) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid or expired OTP");
+  }
+
+  const user = await UserModel.findOne({ email });
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found!");
+  }
+
+  // Mark as verified if not already
+  if (!user.isVerified) {
+    user.isVerified = true;
+    await user.save();
+  }
+
+  const token = generateToken({
+    id: user._id,
+    role: user.role,
+    email: user.email,
+  });
+
+  // Delete OTP after successful verification
+  await OTPModel.deleteOne({ email });
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Login successful",
+    data: {
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+      token,
+    },
+  });
 });
 
 // //cool down timer
@@ -1063,88 +1196,6 @@ export const dashboardStats = async (req: Request, res: Response) => {
   }
 };
 
-// add superadmin
-
-// export const addSuperadmin = catchAsync(async (req: Request, res: Response) => {
-//   const { name, password, phone, email } = req.body;
-
-//   (async () => {
-//     try {
-//       const hashedPassword = await hashPassword(password);
-//       let image: any = {
-//         path: "",
-//         publicFileURL: "",
-//       };
-//       if (req.file) {
-//         const imagePath = `public\\images\\${req.file.filename}`;
-//         const publicFileURL = `/images/${req.file.filename}`;
-//         image = {
-//           path: imagePath,
-//           publicFileURL: publicFileURL,
-//         };
-//       }
-//       // Pass role to createUser
-//       const createdUser: any = await UserModel.create({
-//         name,
-//         password: hashedPassword,
-//         phone,
-//         email,
-//         image: image.publicFileURL,
-//         role: "subadmin",
-//         status: "active",
-//         isVerified: true,
-//       });
-
-//       return sendResponse(res, {
-//         statusCode: 200,
-//         success: true,
-//         message: "Super admin created successfully",
-//         data: createdUser,
-//       });
-//     } catch (backgroundError: any) {
-//       console.error("Error in background tasks:", backgroundError?.message);
-//       return sendResponse(res, {
-//         statusCode: 400,
-//         success: false,
-//         message: "Something went wrong",
-//         data: null,
-//       });
-//     }
-//   })();
-// });
-
-// export const logoutUser = async (req: Request, res: Response) => {
-//   try {
-//     const user = req.user as JwtPayloadWithUser;
-//     const userId = user.id;
-//     const updateLoginStatus = await UserModel.findByIdAndUpdate(
-//       userId,
-//       { isLogin: false },
-//       { new: true, upsert: true }
-//     ).select("name phone email  role isLogin");
-
-//     const token = generateToken({
-//       id: userId,
-//       email: updateLoginStatus.email,
-//       role: updateLoginStatus.role,
-//     });
-
-//     return sendResponse(res, {
-//       statusCode: 200,
-//       success: true,
-//       message: "User logout successfully",
-//       data: { user: updateLoginStatus, token },
-//     });
-//   } catch (err) {
-//     return sendResponse(res, {
-//       statusCode: 400,
-//       success: false,
-//       message: "Your login failed",
-//       data: null,
-//     });
-//   }
-// };
-
 export const getProfileInfo = async (req: Request, res: Response) => {
   const user = req.user as JwtPayloadWithUser;
   const userId = user.id;
@@ -1291,6 +1342,8 @@ const UserController = {
   registerUser,
   resendOTP,
   verifyOTP,
+  userLogin,
+  verifyUserOTP,
   // updateUser,
   // getSelfInfo,
   // deleteUser,

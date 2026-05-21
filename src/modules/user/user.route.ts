@@ -28,6 +28,8 @@ router.post(
 );
 
 router.post("/login", loginUser);
+router.post("/user-login", UserController.userLogin);
+router.post("/verify-user-otp", UserController.verifyUserOTP);
 
 // // router.post("/device-login", UserController.deviceLoginUser);
 router.post("/forget-password", forgotPassword);
