@@ -17,6 +17,10 @@ import { BucketCategoryRoutes } from "../modules/bucketCategory/bucketCategory.r
 import { BucketPriorityRoutes } from "../modules/bucketPriority/bucketPriority.route";
 import { BucketStatusRoutes } from "../modules/bucketStatus/bucketStatus.route";
 import { BucketListRoutes } from "../modules/bucketList/bucketList.route";
+import { PointsRoutes } from "../modules/points/points.route";
+import { NotaryRoutes } from "../modules/notary/notary.route";
+import { PartnerRoutes } from "../modules/partner/partner.route";
+import { ChildrenRoutes } from "../modules/children/children.route";
 
 // import { PaymentRoute } from "../modules/unused_payments/payment.route";
 
@@ -30,6 +34,10 @@ export const routesConfig = [
   { path: "bucket-priority", handler: BucketPriorityRoutes },
   { path: "bucket-status", handler: BucketStatusRoutes },
   { path: "bucket-list", handler: BucketListRoutes },
+  { path: "points", handler: PointsRoutes },
+  { path: "notary", handler: NotaryRoutes },
+  { path: "partner", handler: PartnerRoutes },
+  { path: "children", handler: ChildrenRoutes },
 
   { path: "terms", handler: TermsRoutes },
   { path: "about", handler: AboutRoutes },

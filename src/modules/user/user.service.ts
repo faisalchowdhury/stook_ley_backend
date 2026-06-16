@@ -22,109 +22,7 @@ import {
 } from "../../config";
 
 import { JwtPayloadWithUser } from "../../middlewares/userVerification";
-
-export const registerUserService = async (data: any) => {
-  const { name, phone, email, password } = data.body;
-
-  console.log(data.body);
-  const start = Date.now();
-  const session = await mongoose.startSession();
-  // Check if user already exists
-  const existingUser = await UserModel.findOne({ email });
-
-  if (existingUser) {
-    throw new ApiError(400, "User already exist");
-  }
-  let hashedPassword: string | null = null;
-
-  const userPayload: any = {
-    name,
-    phone,
-    email,
-    isVerified: false,
-  };
-  if (password) {
-    const hashedPassword = await hashPassword(password);
-    userPayload.password = hashedPassword;
-  }
-  // if (data.file) {
-  //   userPayload.profilePicture = `/images/${data.file.filename}`;
-  // }
-  // Create new user
-  const newUser = await UserModel.create(userPayload);
-
-  // Generate and store OTP (optional if you’re using OTP verification)
-  const otp = Math.floor(100000 + Math.random() * 900000);
-  await OTPModel.create({
-    email,
-    otp,
-    expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 mins
-  });
-
-  console.log(`OTP generated for ${email}: ${otp}`);
-
-  const end = Date.now();
-  console.log(`Registration process took ${end - start}ms`);
-
-  //  Keep the return identical to your previous version
-  return {
-    success: true,
-    statusCode: 200,
-    message: "User registered successfully. Please verify your email address.",
-    data: {
-      user: newUser,
-      otp,
-    },
-  };
-};
-
-/**
- * Creates a new user in the database.
- */
-
-const createUser = async ({
-  name,
-  hashedPassword,
-  phone,
-  longitude,
-  latitude,
-  image,
-  fcmToken,
-  role,
-  touchId,
-  faceId,
-}: {
-  name: string;
-  hashedPassword: string | null;
-  phone: number;
-  longitude: number;
-  latitude: number;
-  image: string;
-  fcmToken: string;
-  role: TRole;
-  touchId?: string;
-  faceId?: string;
-}): Promise<{ createdUser: IUser }> => {
-  try {
-    const createdUser = await UserModel.create({
-      name,
-      password: hashedPassword,
-      phone,
-      longitude,
-      latitude,
-      image,
-      fcmToken,
-      role,
-      touchId,
-      faceId,
-    });
-
-    return { createdUser };
-  } catch (error) {
-    console.error("User creation failed:", error);
-    throw new ApiError(500, "User creation failed");
-  }
-};
+import { NotificationModel } from "../notifications/notification.model";
 
 /**
  * Updates a user by ID.
@@ -333,15 +231,6 @@ const verifyOTPService = async (otp: string, authorizationHeader: string) => {
   };
 };
 
-// OTP Verification
-
-// Ensure config is properly typed
-interface Config {
-  twilioAccountSid: string;
-  twilioAuthToken: string;
-  twilioPhoneNumber: string;
-}
-
 const client = new Twilio(twilioAccountSid, twilioAuthToken);
 
 const sendSMS = async (to: string, body: string): Promise<void> => {
@@ -351,7 +240,6 @@ const sendSMS = async (to: string, body: string): Promise<void> => {
       from: twilioPhoneNumber,
       to,
     });
-    // logger.info(`SMS sent to ${to}`);
   } catch (error: any) {
     console.log(`Failed to send SMS to ${to}: ${error.message}`);
     throw error;
@@ -375,9 +263,108 @@ const sendResetPasswordSMS = async (to: string, otp: number): Promise<void> => {
   await sendSMS(to, message);
 };
 
+const finalizeDeathStatus = async (userId: string) => {
+  const user = await UserModel.findById(userId);
+  if (user && user.deathReport?.isPending) {
+    const reportTime = user.deathReport.reportTime!;
+    const now = new Date();
+    const hoursPassed = (now.getTime() - reportTime.getTime()) / (1000 * 60 * 60);
+
+    if (hoursPassed >= 24) {
+      await UserModel.findByIdAndUpdate(userId, {
+        isDeath: true,
+        "deathReport.isPending": false,
+      });
+
+      // Notify the reporter
+      await NotificationModel.create({
+        userId: user.deathReport.reportedBy,
+        userMsgTittle: "Death Report Finalized",
+        userMsg: `The death report for ${user.name} has been finalized after 24 hours of no response.`,
+      });
+    }
+  }
+};
+
+const reportDeath = async (reporterId: string, userId: string) => {
+  const user = await UserModel.findById(userId);
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  if (user.isDeath) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "User is already marked as deceased");
+  }
+
+  if (user.deathReport?.isPending) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "A death report is already pending for this user");
+  }
+
+  const result = await UserModel.findByIdAndUpdate(
+    userId,
+    {
+      deathReport: {
+        reportedBy: new Types.ObjectId(reporterId),
+        reportTime: new Date(),
+        isPending: true,
+      },
+    },
+    { new: true },
+  );
+
+  // Create notification for the user to respond within 24h
+  await NotificationModel.create({
+    userId: userId,
+    userMsgTittle: "Critical: Death Report Received",
+    userMsg: "A death report has been submitted for your account. If you are alive, please respond within 24 hours to decline this report, or your account will be marked as deceased.",
+  });
+
+  // Schedule finalization
+  setTimeout(() => finalizeDeathStatus(userId), 24 * 60 * 60 * 1000);
+
+  return result;
+};
+
+const respondToDeathReport = async (userId: string, isAlive: boolean) => {
+  const user = await UserModel.findById(userId);
+  if (!user || !user.deathReport?.isPending) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "No pending death report found");
+  }
+
+  if (isAlive) {
+    // Decline the report
+    const result = await UserModel.findByIdAndUpdate(
+      userId,
+      {
+        $set: { "deathReport.isPending": false },
+        $unset: { "deathReport.reportedBy": 1, "deathReport.reportTime": 1 },
+      },
+      { new: true },
+    );
+
+    // Notify the reporter that it was declined
+    await NotificationModel.create({
+      userId: user.deathReport.reportedBy,
+      userMsgTittle: "Death Report Declined",
+      userMsg: `${user.name} has responded and declined the death report.`,
+    });
+
+    return result;
+  } else {
+    // Manually confirming death
+    const result = await UserModel.findByIdAndUpdate(
+      userId,
+      {
+        isDeath: true,
+        "deathReport.isPending": false,
+      },
+      { new: true },
+    );
+    return result;
+  }
+};
+
 const UserService = {
-  registerUserService,
-  createUser,
   updateUserById,
   userDelete,
   verifyForgotPasswordOTPService,
@@ -387,6 +374,9 @@ const UserService = {
   sendPhoneVerification,
   sendResetPasswordSMS,
   sendSMS,
+  reportDeath,
+  respondToDeathReport,
+  finalizeDeathStatus,
 };
 
 export { UserService };

@@ -5,6 +5,7 @@ import {
   forgotPassword,
   getSelfInfo,
   loginUser,
+  registerUser,
   resetPassword,
   updateUser,
   uploadProfilePicture,
@@ -21,11 +22,7 @@ export const uploadImages = upload.fields([
   { name: "residancePermit", maxCount: 1 },
   { name: "healthCertificate", maxCount: 1 },
 ]);
-router.post(
-  "/register",
-  upload.single("profilePicture"),
-  UserController.registerUser,
-);
+router.post("/register", upload.single("profilePicture"), registerUser);
 
 router.post("/login", loginUser);
 router.post("/user-login", UserController.userLogin);
@@ -37,11 +34,15 @@ router.post("/reset-password", resetPassword);
 router.post("/verify-otp", verifyOTP);
 router.patch(
   "/profile-update",
-  guardRole(["user"]),
+  guardRole(["admin", "user", "executor", "authorizer"]),
   upload.single("profilePicture"),
   updateUser,
 );
-router.get("/my-profile", guardRole(["admin", "user"]), getSelfInfo);
+router.get(
+  "/my-profile",
+  guardRole(["admin", "user", "executor", "authorizer"]),
+  getSelfInfo,
+);
 router.delete("/account-delete", guardRole(["admin", "user"]), deleteUser);
 router.post("/change-password", guardRole(["admin", "user"]), changePassword);
 router.post("/resend-otp", UserController.resendOTP);
@@ -133,6 +134,17 @@ router.post(
   guardRole("user"),
   upload.single("profilePicture"),
   uploadProfilePicture,
+);
+
+router.post(
+  "/report-death",
+  guardRole(["executor", "authorizer"]),
+  UserController.reportDeath,
+);
+router.post(
+  "/respond-to-death",
+  guardRole(["user"]),
+  UserController.respondToDeathReport,
 );
 
 export const UserRoutes = router;

@@ -16,6 +16,12 @@ export interface IUser extends Document {
   address: string;
   isVerified: boolean;
   isDeleted: boolean;
+  isDeath: boolean;
+  deathReport?: {
+    reportedBy: Types.ObjectId;
+    reportTime: Date;
+    isPending: boolean;
+  };
 }
 export type IOTP = {
   email: string;

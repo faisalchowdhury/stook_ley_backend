@@ -9,7 +9,7 @@ export const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
 export const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
 // export const PORT = 8085; //------> production;
-export const PORT = 4300; //------> development;
+export const PORT = 8080; //------> development;
 export const DATABASE_URL = process.env.DATABASE_URL;
 export const JWT_SECRET_KEY = process.env.JWT_SECRET_KEY;
 export const Nodemailer_GMAIL = process.env.Nodemailer_GMAIL;
@@ -21,6 +21,11 @@ export const STRIPE_WEBHOOK_ENDPOINT_SECRET = process.env.endpoint_secret;
 export const STRIPE_BASE_URL = "https://grassrootz-asifur-rahman.sarv.live/";
 export const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 export const STRIPE_PUBLISH_KEY = process.env.STRIPE_PUBLISH_KEY;
+
+// Stripe Checkout (hosted) payments
+export const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+export const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+export const PRODUCT_PRICE_ID = process.env.PRODUCT_PRICE_ID || "";
 export const NODE_ENV = process.env.NODE_ENV;
 export const REDIS_HOST = "localhost";
 export const REDIS_PORT = 8002;

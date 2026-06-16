@@ -8,6 +8,12 @@ router.post("/assign", guardRole(["user"]), KeeperController.assignKeeper);
 
 router.get("/my-keepers", guardRole(["user"]), KeeperController.getMyKeepers);
 
+router.get(
+  "/assigned-to-me",
+  guardRole(["user", "executor", "authorizer"]),
+  KeeperController.getAssignedToMe,
+);
+
 router.get("/:id", guardRole(["user"]), KeeperController.getSingleKeeper);
 
 router.patch("/update/:id", guardRole(["user"]), KeeperController.updateKeeper);

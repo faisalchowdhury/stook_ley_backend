@@ -95,10 +95,23 @@ const deleteKeeper = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getAssignedToMe = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as IUserPayload;
+  const result = await KeeperService.getAssignedToMe(user.email);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Assignments retrieved successfully",
+    data: result,
+  });
+});
+
 export const KeeperController = {
   assignKeeper,
   getMyKeepers,
   getSingleKeeper,
   updateKeeper,
   deleteKeeper,
+  getAssignedToMe,
 };

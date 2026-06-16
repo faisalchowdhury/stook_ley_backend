@@ -20,4 +20,6 @@ const keeperSchema = new Schema<IKeeper>(
   { timestamps: true },
 );
 
+keeperSchema.index({ userId: 1, email: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
+
 export const KeeperModel = mongoose.model<IKeeper>("Keeper", keeperSchema);

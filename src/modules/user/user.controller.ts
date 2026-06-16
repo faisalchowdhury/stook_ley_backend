@@ -7,6 +7,8 @@ import sendResponse from "../../utils/sendResponse";
 import { UserService } from "./user.service";
 
 import { OTPModel, UserModel } from "./user.model";
+import { PartnerModel } from "../partner/partner.model";
+import { ChildrenModel } from "../children/children.model";
 
 import { emitNotification } from "../../utils/socket";
 import httpStatus from "http-status";
@@ -38,45 +40,50 @@ import { IUserPayload } from "../../middlewares/roleGuard";
 import { JwtPayloadWithUser } from "../../middlewares/userVerification";
 
 import mongoose from "mongoose";
-import { number } from "zod";
 
 //  register User
 
-export const registerUser = async (data: any, res: Response) => {
+export const registerUser = async (req: Request, res: Response) => {
   try {
-    console.log("1. Starting registration...");
-    const { name, phone, email, password, role } = data.body;
-    console.log("2. Extracted data:", {
-      name,
-      phone,
+    const { name, phone, email, password, role } = req.body;
+
+    // Validate password based on role
+    const userRole = role || "user";
+
+    // --- Role-Based Uniqueness Constraint ---
+    // 1. Check for exact match (same email + same role)
+    const existingExactUser = await UserModel.findOne({
       email,
-      role,
-      hasPassword: !!password,
+      role: userRole,
     });
-
-    const start = Date.now();
-
-    // Check if user already exists
-    console.log("3. Checking existing user...");
-    const existingUser = await UserModel.findOne({ email });
-    console.log("4. Existing user check complete:", !!existingUser);
-
-    if (existingUser) {
+    if (existingExactUser) {
       return res.status(400).json({
         success: false,
         statusCode: 400,
-        message: "User already exists",
+        message: `User with this email already exists as ${userRole}`,
         data: null,
       });
     }
 
-    // Validate password based on role
-    const userRole = role || "user";
-    console.log("5. User role:", userRole);
+    // 2. Cross-role constraint: authorizer vs executor
+    // If trying to register as executor, check if already an authorizer (and vice versa)
+    if (userRole === "executor" || userRole === "authorizer") {
+      const otherRole = userRole === "executor" ? "authorizer" : "executor";
+      const existingOtherRole = await UserModel.findOne({
+        email,
+        role: otherRole,
+      });
+      if (existingOtherRole) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: `This email is already registered as an ${otherRole}. An email cannot be both an executor and an authorizer.`,
+          data: null,
+        });
+      }
+    }
 
-    console.log("5a. Checking password requirement...");
     if ((userRole === "authorizer" || userRole === "executor") && !password) {
-      console.log("5b. Password required but not provided");
       return res.status(400).json({
         success: false,
         statusCode: 400,
@@ -84,9 +91,7 @@ export const registerUser = async (data: any, res: Response) => {
         data: null,
       });
     }
-    console.log("5c. Password validation passed");
 
-    console.log("6. Building user payload...");
     const userPayload: any = {
       name,
       phone,
@@ -98,44 +103,32 @@ export const registerUser = async (data: any, res: Response) => {
 
     // Only hash and save password for authorizer and executor roles
     if ((userRole === "authorizer" || userRole === "executor") && password) {
-      console.log("7. Authorizer/Executor role - hashing password...");
       const hashedPassword = await hashPassword(password);
-      console.log("8. Password hashed");
       userPayload.password = hashedPassword;
-    } else {
-      console.log("7. User role - password set to null");
     }
 
-    console.log("8. User payload created:", userPayload);
-
     // Create new user
-    console.log("9. Creating user in database...");
     const newUser = await UserModel.create(userPayload);
-    console.log("10. User created:", newUser._id);
 
-    // Generate and store OTP
-    console.log("11. Generating OTP...");
-    const otp = Math.floor(100000 + Math.random() * 900000);
+    // Generate, store and SEND OTP
+    const otp = generateOTP();
+    await saveOTP(email, otp);
+    await sendOTPEmailRegister(name, email, otp);
 
-    console.log("12. Saving OTP to database...");
-    await OTPModel.create({
-      email,
-      otp: otp.toString(),
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    const token = generateToken({
+      id: newUser._id,
+      email: newUser.email,
+      role: newUser.role,
     });
-    console.log("13. OTP saved:", otp);
-
-    const end = Date.now();
-    console.log(`14. Registration complete in ${end - start}ms`);
 
     return res.status(200).json({
       success: true,
       statusCode: 200,
-      message:
-        "User registered successfully. Please verify your email address.",
+      message: "User registered successfully. Please verify your email.",
       data: {
         user: newUser,
-        otp,
+        token,
+        otp, // Included for testing purpose
       },
     });
   } catch (error: any) {
@@ -148,6 +141,7 @@ export const registerUser = async (data: any, res: Response) => {
     });
   }
 };
+
 const resendOTP = catchAsync(async (req: Request, res: Response) => {
   const email = req.body.email;
 
@@ -180,9 +174,18 @@ const resendOTP = catchAsync(async (req: Request, res: Response) => {
 });
 
 export const loginUser = catchAsync(async (req: Request, res: Response) => {
-  const { email, password, fcmToken } = req.body;
+  const { email, password, role } = req.body;
 
-  const user: any = await UserModel.findOne({ email });
+  // Logic: /auth/login is for Authorizer and Executor roles.
+  // If no role is passed, search specifically for one of those two.
+  const query: any = { email };
+  if (role) {
+    query.role = role;
+  } else {
+    query.role = { $in: ["authorizer", "executor"] };
+  }
+
+  const user: any = await UserModel.findOne(query);
   if (!user) {
     throw new ApiError(401, "This account does not exist.");
   }
@@ -221,7 +224,7 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
   // If user role is 'user', they should use OTP login, but if they have a password set, we can allow them to login or enforce OTP.
   // Based on instructions, users shouldn't need a password.
   if (user.role === "user" && !user.password) {
-     throw new ApiError(403, "Please use OTP login for user account.");
+    throw new ApiError(403, "Please use OTP login for user account.");
   }
 
   const isPasswordValid = await argon2.verify(
@@ -262,7 +265,8 @@ export const userLogin = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(400, "Please provide your email.");
   }
 
-  const user = await UserModel.findOne({ email });
+  // Specifically look for 'user' role for passwordless login
+  const user = await UserModel.findOne({ email, role: "user" });
   if (!user) {
     throw new ApiError(404, "User not found. Please register first.");
   }
@@ -295,7 +299,8 @@ export const verifyUserOTP = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid or expired OTP");
   }
 
-  const user = await UserModel.findOne({ email });
+  // Specifically look for 'user' role
+  const user = await UserModel.findOne({ email, role: "user" });
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, "User not found!");
   }
@@ -443,74 +448,71 @@ export const verifyOTP = catchAsync(async (req: Request, res: Response) => {
 // User Id
 export const updateUser = catchAsync(async (req: Request, res: Response) => {
   const { name, phone, address } = req.body;
-
   const decoded = req.user as IUserPayload;
   const userId = decoded.id;
 
-  const user = await findUserById(userId);
-  if (!user) {
-    throw new ApiError(404, "User not found.");
-  }
-
   const updateData: any = {};
-
   if (name) updateData.name = name;
   if (phone) updateData.phone = phone;
   if (address) updateData.address = address;
-
-  // if (email && email !== user.email) {
-  //   const emailExists = await UserModel.findOne({
-  //     email,
-  //     _id: { $ne: userId },
-  //   });
-
-  //   if (emailExists) {
-  //     throw new ApiError(409, "Email already in use.");
-  //   }
-
-  //   updateData.email = email;
-  // }
 
   if (req.file) {
     updateData.profilePicture = `/images/${req.file.filename}`;
   }
 
-  const updatedUser = await UserService.updateUserById(userId, updateData);
+  const updatedUser = await UserModel.findByIdAndUpdate(
+    userId,
+    { $set: updateData },
+    { new: true, runValidators: true },
+  );
+
+  if (!updatedUser) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
 
   return sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Profile updated.",
-    data: {
-      _id: updatedUser?._id,
-      name: updatedUser?.name,
-      email: updatedUser?.email,
-      phone: updatedUser?.phone,
-      address: updatedUser?.address,
-      phofilePicture: updatedUser?.profilePicture,
-    },
+    message: "Profile updated successfully",
+    data: updatedUser,
   });
 });
 
 export const getSelfInfo = catchAsync(async (req: Request, res: Response) => {
   try {
     const decoded = req.user as IUserPayload;
-
     const userId = decoded.id as string;
 
-    // Find the user in DB
-    const user = await findUserById(userId);
+    // Find the user in DB with deathReport.reportedBy populated
+    const user = await UserModel.findById(userId).populate(
+      "deathReport.reportedBy",
+      "name email profilePicture",
+    );
     if (!user) {
       throw new ApiError(404, "User not found.");
     }
 
-    // Prepare base response (common fields)
+    const userData = user.toObject();
+
+    // Fetch Partner and Children data
+    const [partner, children] = await Promise.all([
+      PartnerModel.findOne({ userId, isDeleted: false }),
+      ChildrenModel.find({ userId, isDeleted: false }),
+    ]);
+
+    // Prepare response data
     const responseData: any = {
-      _id: user._id,
-      firstName: user.name,
-      email: user.email,
-      profilePicture: user.profilePicture || null,
-      role: user.role,
+      _id: userData._id,
+      name: userData.name,
+      email: userData.email,
+      phone: userData.phone,
+      address: userData.address,
+      profilePicture: userData.profilePicture || null,
+      role: userData.role,
+      isDeath: userData.isDeath,
+      deathReport: userData.deathReport,
+      partner: partner || null,
+      children: children || [],
     };
 
     // Send final response
@@ -519,13 +521,11 @@ export const getSelfInfo = catchAsync(async (req: Request, res: Response) => {
       success: true,
       message: "Profile information retrieved successfully",
       data: responseData,
-      pagination: undefined,
     });
   } catch (error: any) {
     throw new ApiError(
       error.statusCode || 500,
-      error.message ||
-        "Unexpected error occurred while retrieving user information.",
+      error.message || "Unexpected error occurred while retrieving profile.",
     );
   }
 });
@@ -536,7 +536,7 @@ export const uploadProfilePicture = catchAsync(
     const userId = user.id;
     const payload: any = {};
     if (req.file) {
-      payload.image = `/image/${req.file.filename}`;
+      payload.profilePicture = `/image/${req.file.filename}`;
     }
 
     const uploadImage = await UserModel.findOneAndUpdate(
@@ -1233,7 +1233,6 @@ export const getProfileInfo = async (req: Request, res: Response) => {
         },
       },
 
-      // Rename _id (barber's) → barberId and rename original userId
       {
         $addFields: {
           barberId: "$barberInfo._id",
@@ -1337,6 +1336,44 @@ export const getProfileInfo = async (req: Request, res: Response) => {
 //     });
 //   }
 // );
+const reportDeath = catchAsync(async (req: Request, res: Response) => {
+  const reporter = req.user as IUserPayload;
+  const { userId } = req.body;
+
+  if (!userId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "User ID is required");
+  }
+
+  const result = await UserService.reportDeath(reporter.id, userId);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message:
+      "Death report submitted successfully. User has 24 hours to respond.",
+    data: result,
+  });
+});
+
+const respondToDeathReport = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as IUserPayload;
+  const { isAlive } = req.body;
+
+  if (isAlive === undefined) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "isAlive status is required");
+  }
+
+  const result = await UserService.respondToDeathReport(user.id, isAlive);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: isAlive
+      ? "Death report declined successfully."
+      : "Death confirmed.",
+    data: result,
+  });
+});
 
 const UserController = {
   registerUser,
@@ -1344,22 +1381,14 @@ const UserController = {
   verifyOTP,
   userLogin,
   verifyUserOTP,
-  // updateUser,
-  // getSelfInfo,
-  // deleteUser,
-  // changePassword,
-  // adminloginUser,
+  updateUser,
+  getSelfInfo,
+  deleteUser,
+  changePassword,
+  adminloginUser,
   getAllUsers,
-
-  // updateAdminInformation,
-  // // updateAdminPassword,
-  // getAdminInfo,
-  // updateUserStatus,
-  // searchCustomer,
-  // getAdminProfile,
-  // getAllSubadmin,
-  // addDeviceId,
-  // // deviceLoginUser,
+  reportDeath,
+  respondToDeathReport,
 };
 
 export { UserController };

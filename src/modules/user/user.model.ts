@@ -8,7 +8,7 @@ const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true },
     phone: { type: String, required: true },
-    email: { type: String, required: true, unique: true, index: true },
+    email: { type: String, required: true, index: true },
     address: { type: String },
 
     password: { type: String, required: false },
@@ -20,24 +20,17 @@ const userSchema = new Schema<IUser>(
     profilePicture: { type: String, required: false },
     isVerified: { type: Boolean, required: true, default: false },
     isDeleted: { type: Boolean, required: true, default: false },
+    isDeath: { type: Boolean, required: true, default: false },
+    deathReport: {
+      reportedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      reportTime: { type: Date },
+      isPending: { type: Boolean, default: false },
+    },
   },
   { timestamps: true },
 );
 
-// UserSchema.index({ location: "2dsphere" });
-// // Pre-save hook to automatically update location from lat/lng
-// UserSchema.pre("save", function (next) {
-//   const lat = this.latitude || 23.746489;
-//   const lng = this.longitude || 90.372348;
-
-//   if (lat < -90 || lat > 90)
-//     return next(new Error("Latitude must be between -90 and 90"));
-//   if (lng < -180 || lng > 180)
-//     return next(new Error("Longitude must be between -180 and 180"));
-
-//   this.location = { type: "Point", coordinates: [lng, lat] };
-//   next();
-// });
+userSchema.index({ email: 1, role: 1 }, { unique: true });
 
 export const UserModel = mongoose.model<IUser>("User", userSchema);
 
