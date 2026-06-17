@@ -108,6 +108,36 @@ const getStatus = async (sessionId: string) => {
   };
 };
 
+const findMany = async (query: any, skip: number, limit: number) => {
+  return await PaymentModel.find(query)
+    .populate("userId", "name email")
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+};
+
+const countDocuments = async (query: any) => {
+  return await PaymentModel.countDocuments(query);
+};
+
+const getStats = async () => {
+  const [totalAgg, completed, pending, failed] = await Promise.all([
+    PaymentModel.aggregate([
+      { $match: { status: "paid" } },
+      { $group: { _id: null, total: { $sum: "$amountTotal" } } },
+    ]),
+    PaymentModel.countDocuments({ status: "paid" }),
+    PaymentModel.countDocuments({ status: "pending" }),
+    PaymentModel.countDocuments({ status: { $in: ["failed", "expired"] } }),
+  ]);
+  return {
+    totalVolume: totalAgg[0]?.total || 0,
+    completed,
+    pending,
+    failed,
+  };
+};
+
 export const PaymentService = {
   createPayment,
   getBySessionId,
@@ -115,4 +145,7 @@ export const PaymentService = {
   markExpired,
   markFailedByPaymentIntent,
   getStatus,
+  findMany,
+  countDocuments,
+  getStats,
 };

@@ -1,5 +1,6 @@
 import express from "express";
 import { PaymentController } from "./payment.controller";
+import { guardRole } from "../../middlewares/roleGuard";
 
 const router = express.Router();
 
@@ -12,5 +13,7 @@ router.post(
 );
 
 router.get("/status/:sessionId", PaymentController.getStatus);
+
+router.get("/admin/all", guardRole(["admin"]), PaymentController.adminGetAllPayments);
 
 export const PaymentRoutes = router;

@@ -164,8 +164,52 @@ const stripeWebhook = async (req: Request, res: Response) => {
   return res.status(200).json({ received: true });
 };
 
+const adminGetAllPayments = catchAsync(async (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const status = req.query.status as string;
+  const search = req.query.search as string;
+  const skip = (page - 1) * limit;
+
+  const query: any = {};
+  if (status) query.status = status;
+  if (search) {
+    query.$or = [
+      { productName: { $regex: search, $options: "i" } },
+      { sessionId: { $regex: search, $options: "i" } },
+      { customerEmail: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const [payments, total, statsAgg] = await Promise.all([
+    PaymentService.findMany(query, skip, limit),
+    PaymentService.countDocuments(query),
+    PaymentService.getStats(),
+  ]);
+
+  const totalPages = Math.ceil(total / limit);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Payments retrieved successfully",
+    data: {
+      payments,
+      stats: statsAgg,
+      pagination: {
+        totalData: total,
+        totalPage: totalPages,
+        currentPage: page,
+        prevPage: page > 1 ? page - 1 : null,
+        nextPage: page < totalPages ? page + 1 : null,
+      },
+    },
+  });
+});
+
 export const PaymentController = {
   createCheckoutSession,
   getStatus,
   stripeWebhook,
+  adminGetAllPayments,
 };
