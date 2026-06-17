@@ -38,7 +38,6 @@ export const guardRole = (roles: TRole | TRole[]) => {
         (Array.isArray(roles) && roles.includes(userRole as TRole)) ||
         roles === userRole
       ) {
-        console.log(decoded);
         const user = (await UserModel.findOne({ _id: decoded.id })) as any;
         if (!user.isVerified) {
           return sendResponse(res, {

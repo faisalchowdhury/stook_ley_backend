@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { OTPModel, UserModel } from "./user.model";
 import { Nodemailer_GMAIL, Nodemailer_GMAIL_PASSWORD } from "../../config";
 
@@ -408,19 +409,14 @@ export const hashPassword = async (password: string): Promise<string> => {
     throw new Error("Password hashing failed");
   }
 };
-//some times it send 5 digit instead of 6
-// export const generateOTP = (): string => {
-//   return Math.floor(1000 + Math.random() * 900000).toString();
-// };
-
 export const generateOTP = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 };
 
 export const saveOTP = async (email: string, otp: string): Promise<void> => {
   await OTPModel.findOneAndUpdate(
     { email },
-    { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+    { otp, expiresAt: new Date(Date.now() + 5 * 60 * 1000) },
     { upsert: true, new: true },
   );
 };

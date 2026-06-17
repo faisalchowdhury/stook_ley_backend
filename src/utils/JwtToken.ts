@@ -80,14 +80,14 @@ export const verifyToken = (
   }
 };
 export const generateRegisterToken = (payload: any): string => {
-  return jwt.sign(payload, JWT_SECRET_KEY as string);
+  return jwt.sign(payload, JWT_SECRET_KEY as string, { expiresIn: "15m" });
 };
 export const generateRefreshToken = (payload: any): string => {
-  return jwt.sign(payload, JWT_SECRET_KEY as string);
+  return jwt.sign(payload, JWT_SECRET_KEY as string, { expiresIn: "30d" });
 };
 
 export const generateAccessToken = (payload: any): string => {
-  return jwt.sign(payload, JWT_SECRET_KEY as string);
+  return jwt.sign(payload, JWT_SECRET_KEY as string, { expiresIn: "7d" });
 };
 
 export const generateAccessRefreshToken = async (userId: string) => {
@@ -149,7 +149,7 @@ export const generateAccessRefreshToken = async (userId: string) => {
 //   }
 // };
 
-const expiresInOneHourForLogin = 365 * 24 * 60 * 60;
+const expiresInOneHourForLogin = 7 * 24 * 60 * 60;
 export function generateTokenForLogin({
   id,
   name,

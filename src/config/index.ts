@@ -31,9 +31,8 @@ export const REDIS_HOST = "localhost";
 export const REDIS_PORT = 8002;
 export const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
 export const REDIS_DB = 0;
-export const ONE_SIGNAL_APP_ID = "b57562d8-42a1-4d60-9751-a4040b8b46ab";
-export const ONE_SIGNAL_REST_API_KEY =
-  "os_v2_app_wv2wfwccufgwbf2ruqcaxc2gvpe7vv4l7ciurammjxzugjq323ocs7td5se6ki3l7vzxevawu4prbmafqzpzhpl2za3u5zs6ihqfu2i";
+export const ONE_SIGNAL_APP_ID = process.env.ONE_SIGNAL_APP_ID || "";
+export const ONE_SIGNAL_REST_API_KEY = process.env.ONE_SIGNAL_REST_API_KEY || "";
 
 export const FIREBASE_SERVICE_ACCOUNT_PATH =
   process.env.FIREBASE_SERVICE_ACCOUNT_PATH ||

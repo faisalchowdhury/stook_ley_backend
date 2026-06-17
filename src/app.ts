@@ -29,15 +29,7 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: [
-      "*",
-      CLIENT_URL,
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "https://barber-admin-dashboard-mytf0qi4b-faisal-chowdhurys-projects.vercel.app",
-      "https://barber-admin-dashboard-knvz8p4zy-faisal-chowdhurys-projects.vercel.app",
-    ],
-    credentials: true,
+    origin: "*",
   }),
 );
 

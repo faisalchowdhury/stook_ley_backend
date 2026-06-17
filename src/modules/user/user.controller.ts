@@ -60,7 +60,7 @@ export const registerUser = async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         statusCode: 400,
-        message: `User with this email already exists as ${userRole}`,
+        message: "Registration failed. Please check your details and try again.",
         data: null,
       });
     }
@@ -77,7 +77,7 @@ export const registerUser = async (req: Request, res: Response) => {
         return res.status(400).json({
           success: false,
           statusCode: 400,
-          message: `This email is already registered as an ${otherRole}. An email cannot be both an executor and an authorizer.`,
+          message: "Registration failed. Please check your details and try again.",
           data: null,
         });
       }
@@ -128,7 +128,6 @@ export const registerUser = async (req: Request, res: Response) => {
       data: {
         user: newUser,
         token,
-        otp, // Included for testing purpose
       },
     });
   } catch (error: any) {
@@ -176,24 +175,18 @@ const resendOTP = catchAsync(async (req: Request, res: Response) => {
 export const loginUser = catchAsync(async (req: Request, res: Response) => {
   const { email, password, role } = req.body;
 
-  // Logic: /auth/login is for Authorizer and Executor roles.
-  // If no role is passed, search specifically for one of those two.
   const query: any = { email };
   if (role) {
     query.role = role;
   } else {
-    query.role = { $in: ["authorizer", "executor"] };
+    query.role = { $in: ["admin", "authorizer", "executor"] };
   }
 
   const user: any = await UserModel.findOne(query);
-  if (!user) {
-    throw new ApiError(401, "This account does not exist.");
+  if (!user || user.isDeleted) {
+    throw new ApiError(401, "Invalid email or password.");
   }
 
-  if (user.isDeleted) {
-    throw new ApiError(404, "your account is deleted.");
-  }
-  // await validateUserLockStatus(user);
   const userId = user._id as string;
 
   const verifyToken = generateToken({
@@ -202,29 +195,25 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
     role: user.role,
   });
   if (!user.isVerified) {
-    sendResponse(res, {
+    const name = user.name as string;
+    const otp = generateOTP();
+    sendOTPEmailVerification(name, email, otp).catch((err) => {
+      console.error("Error sending OTP email:", err);
+    });
+    await saveOTP(email, otp);
+    return sendResponse(res, {
       statusCode: 401,
       success: false,
-      message: "We've sent an OTP to your email to verify your profile.",
+      message: "Please verify your email. An OTP has been sent.",
       data: {
-        role: user.role,
         token: verifyToken,
       },
     });
-    const name = user.name as string;
-    const otp = generateOTP();
-    sendOTPEmailVerification(name, email, otp)
-      .then(() => {})
-      .catch((err) => {
-        console.error("Error sending OTP email:", err);
-      });
-    return await saveOTP(email, otp);
   }
 
-  // If user role is 'user', they should use OTP login, but if they have a password set, we can allow them to login or enforce OTP.
-  // Based on instructions, users shouldn't need a password.
+  // If user role is 'user', they should use OTP login
   if (user.role === "user" && !user.password) {
-    throw new ApiError(403, "Please use OTP login for user account.");
+    throw new ApiError(401, "Invalid email or password.");
   }
 
   const isPasswordValid = await argon2.verify(
@@ -232,7 +221,7 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
     password,
   );
   if (!isPasswordValid) {
-    throw new ApiError(401, "Wrong password!");
+    throw new ApiError(401, "Invalid email or password.");
   }
 
   const token = generateToken({
@@ -267,22 +256,18 @@ export const userLogin = catchAsync(async (req: Request, res: Response) => {
 
   // Specifically look for 'user' role for passwordless login
   const user = await UserModel.findOne({ email, role: "user" });
-  if (!user) {
-    throw new ApiError(404, "User not found. Please register first.");
-  }
 
-  if (user.isDeleted) {
-    throw new ApiError(404, "Your account is deleted.");
+  // Always return the same response to prevent account enumeration
+  if (user && !user.isDeleted) {
+    const otp = generateOTP();
+    await sendOTPEmailRegister(user.name, email, otp);
+    await saveOTP(email, otp);
   }
-
-  const otp = generateOTP();
-  await sendOTPEmailRegister(user.name, email, otp);
-  await saveOTP(email, otp);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "OTP sent to your email. Please check!",
+    message: "If this email is registered, an OTP has been sent.",
     data: null,
   });
 });
@@ -344,38 +329,23 @@ export const forgotPassword = catchAsync(
       throw new ApiError(400, "Please provide your email.");
     }
 
-    // await delCache(email);
     const user = await UserModel.findOne({ email });
-    if (!user) {
-      throw new ApiError(401, "This account does not exist.");
+
+    // Always return the same response to prevent account enumeration
+    const token = generateRegisterToken({ email });
+
+    if (user && !user.isDeleted) {
+      const otp = generateOTP();
+      await sendOTPEmailRegister(user.name, email, otp);
+      await saveOTP(email, otp);
     }
 
-    const now = new Date();
-    // Check if there's a pending OTP request and if the 2-minute cooldown has passed
-    // const otpRecord = await OTPModel.findOne({ email });
-    // if (otpRecord && otpRecord.expiresAt > now) {
-    //   const remainingTime = Math.floor(
-    //     (otpRecord.expiresAt.getTime() - now.getTime()) / 1000
-    //   );
-
-    //   throw new ApiError(
-    //     403,
-    //     `You can't request another OTP before ${remainingTime} seconds.`
-    //   );
-    // }
-    const token = generateRegisterToken({ email });
     sendResponse(res, {
       statusCode: httpStatus.OK,
       success: true,
-      message: "OTP sent to your email. Please check!",
+      message: "If this email is registered, an OTP has been sent.",
       data: { token },
     });
-    const otp = generateOTP();
-    // await setCache(email, otp, 300);
-    // await UserService.sendPhoneVerification(phone, otp);
-    await sendOTPEmailRegister(user.name, email, otp);
-    await saveOTP(email, otp);
-    // await saveOTP(email, otp); // Save OTP with expiration
   },
 );
 
@@ -383,43 +353,36 @@ export const resetPassword = catchAsync(async (req: Request, res: Response) => {
   let decoded: any;
   try {
     decoded = verifyToken(req.headers.authorization);
-    console.log(decoded);
   } catch (error: any) {
     return sendError(res, error);
   }
-  // if (!decoded.role) {
-  //   throw new ApiError(401, "Invalid token. Please try again.");
-  // }
-  const email = decoded.email as string;
 
+  const email = decoded.email as string;
   const { password } = req.body;
-  console.log(password);
+
   if (!password) {
-    throw new ApiError(400, "Please provide  password ");
+    throw new ApiError(400, "Please provide password.");
   }
+
+  const user = await findUserByEmail(email);
+  if (!user) {
+    throw new ApiError(404, "Password reset failed.");
+  }
+
+  const newPassword = await hashPassword(password);
+  user.password = newPassword;
+  await user.save();
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Password reset successfully.",
     data: null,
   });
-
-  const user = await findUserByEmail(email);
-
-  if (!user) {
-    throw new ApiError(
-      404,
-      "User not found. Are you attempting something sneaky?",
-    );
-  }
-  const newPassword = await hashPassword(password);
-  user.password = newPassword;
-  await user.save();
 });
 
 export const verifyOTP = catchAsync(async (req: Request, res: Response) => {
   const { otp } = req.body;
-  console.log("dsfdsfsdf");
   try {
     const { token, name, email } = await UserService.verifyOTPService(
       otp,
@@ -427,10 +390,8 @@ export const verifyOTP = catchAsync(async (req: Request, res: Response) => {
     );
 
     const user = (await UserModel.findOne({ email })) as any;
-    console.log(user);
     // Mark user as verified, if needed
     if (!user.isVerified) {
-      console.log("sdfdf");
       user.isVerified = true;
       await user.save();
     }
@@ -633,13 +594,9 @@ const adminloginUser = catchAsync(async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
-    const user = await UserModel.findOne(email);
+    const user = await UserModel.findOne({ email, role: "admin" });
     if (!user) {
-      throw new ApiError(401, "This account does not exist.");
-    }
-
-    if (user.role !== "admin") {
-      throw new ApiError(403, "Only admins can login.");
+      throw new ApiError(401, "Invalid email or password.");
     }
 
     // Check password validity
@@ -648,7 +605,7 @@ const adminloginUser = catchAsync(async (req: Request, res: Response) => {
       password,
     );
     if (!isPasswordValid) {
-      throw new ApiError(401, "Wrong password!");
+      throw new ApiError(401, "Invalid email or password.");
     }
 
     const userId = user._id as string;

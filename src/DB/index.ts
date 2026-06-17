@@ -36,7 +36,7 @@ export const seedSuperAdmin = async () => {
   const admins = [admin2];
 
   for (const adminData of admins) {
-    const isAdminExists = await UserModel.findOne({ email: adminData.email });
+    const isAdminExists = await UserModel.findOne({ email: adminData.email, role: adminData.role });
 
     if (!isAdminExists) {
       const hashedPassword = await hashPassword(adminData.password);
