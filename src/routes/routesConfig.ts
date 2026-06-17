@@ -21,6 +21,7 @@ import { PointsRoutes } from "../modules/points/points.route";
 import { NotaryRoutes } from "../modules/notary/notary.route";
 import { PartnerRoutes } from "../modules/partner/partner.route";
 import { ChildrenRoutes } from "../modules/children/children.route";
+import { RewardConfigRoutes } from "../modules/rewardConfig/rewardConfig.route";
 
 // import { PaymentRoute } from "../modules/unused_payments/payment.route";
 
@@ -46,6 +47,7 @@ export const routesConfig = [
 
   // { path: "/api/v1/payment", handler: PaymentRoute },
 
+  { path: "reward-config", handler: RewardConfigRoutes },
   { path: "admin", handler: AdminRoutes },
 
   //------>publishing app <--------------
