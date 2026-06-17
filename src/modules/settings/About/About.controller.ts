@@ -98,8 +98,8 @@ export const updateAbout = catchAsync(async (req: Request, res: Response) => {
 
   const sanitizedDescription = sanitizeHtml(description, sanitizeOptions);
 
-  // Assume you're updating the terms based on the sanitized description
-  const result = await updateAboutInDB(sanitizedDescription);
+  const { countriesServed, activeUsers, industryAwards } = req.body;
+  const result = await updateAboutInDB(sanitizedDescription, { countriesServed, activeUsers, industryAwards });
 
   if (!result) {
     return sendError(res, {

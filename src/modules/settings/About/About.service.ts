@@ -15,10 +15,15 @@ export const getAllAboutFromDB = async () => {
   return about;
 };
 
-export const updateAboutInDB = async (newData: string) => {
+export const updateAboutInDB = async (newData: string, extras?: { countriesServed?: number; activeUsers?: string; industryAwards?: number }) => {
+  const updatePayload: any = { description: newData };
+  if (extras?.countriesServed !== undefined) updatePayload.countriesServed = extras.countriesServed;
+  if (extras?.activeUsers !== undefined) updatePayload.activeUsers = extras.activeUsers;
+  if (extras?.industryAwards !== undefined) updatePayload.industryAwards = extras.industryAwards;
+
   const updatedAbout = await AboutModel.findOneAndUpdate(
     {},
-    { description: newData },
+    updatePayload,
     { new: true, upsert: true },
   );
 
