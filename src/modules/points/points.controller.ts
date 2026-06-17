@@ -45,7 +45,29 @@ const getMyPoints = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const adminAssignPoints = catchAsync(async (req: Request, res: Response) => {
+  const { userId, amount, reason } = req.body;
+
+  if (!userId || amount === undefined) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "userId and amount are required");
+  }
+
+  if (typeof amount !== "number" || amount <= 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "amount must be a positive number");
+  }
+
+  const result = await PointsService.updatePoints(userId, amount, "plus");
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: `${amount} points assigned successfully`,
+    data: { ...result.toObject(), reason },
+  });
+});
+
 export const PointsController = {
   updatePoints,
   getMyPoints,
+  adminAssignPoints,
 };

@@ -16,4 +16,10 @@ router.get(
   PointsController.getMyPoints,
 );
 
+router.post(
+  "/admin-assign",
+  guardRole(["admin"]),
+  PointsController.adminAssignPoints,
+);
+
 export const PointsRoutes = router;
