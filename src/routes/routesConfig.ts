@@ -22,6 +22,7 @@ import { NotaryRoutes } from "../modules/notary/notary.route";
 import { PartnerRoutes } from "../modules/partner/partner.route";
 import { ChildrenRoutes } from "../modules/children/children.route";
 import { RewardConfigRoutes } from "../modules/rewardConfig/rewardConfig.route";
+import { ConvertPointsRoutes } from "../modules/convertPoints/convertPoints.route";
 
 // import { PaymentRoute } from "../modules/unused_payments/payment.route";
 
@@ -36,6 +37,7 @@ export const routesConfig = [
   { path: "bucket-status", handler: BucketStatusRoutes },
   { path: "bucket-list", handler: BucketListRoutes },
   { path: "points", handler: PointsRoutes },
+  { path: "convert-points", handler: ConvertPointsRoutes },
   { path: "notary", handler: NotaryRoutes },
   { path: "partner", handler: PartnerRoutes },
   { path: "children", handler: ChildrenRoutes },
