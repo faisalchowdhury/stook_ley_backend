@@ -29,7 +29,12 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: ["*", "https://legacy-keeper.app"],
+    origin: [
+      "*",
+      "https://legacy-keeper.app",
+      "https://dashboard.legacy-keeper.app",
+      "https://www.legacy-keeper.app/",
+    ],
   }),
 );
 
