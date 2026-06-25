@@ -1,5 +1,6 @@
 import { createServer, Server as HttpServer } from "http";
 import { initSocketIO } from "./utils/socket";
+import { startScheduler } from "./utils/scheduler";
 import mongoose from "mongoose";
 import app from "./app"; // Express app
 import { DATABASE_URL, PORT } from "./config";
@@ -54,6 +55,9 @@ async function main() {
 
     // Initialize Socket.IO
     initSocketIO(server);
+
+    // Start scheduled background jobs (e.g. death-report finalization sweep)
+    startScheduler();
 
     // Start seeding in parallel after the server has started
     await Promise.all([

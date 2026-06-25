@@ -23,6 +23,75 @@ import {
 
 import { JwtPayloadWithUser } from "../../middlewares/userVerification";
 import { NotificationModel } from "../notifications/notification.model";
+import { KeeperModel } from "../keeper/keeper.model";
+import { sendPushNotificationToMultiple } from "../notifications/pushNotification/pushNotification.controller";
+
+/**
+ * Create a DB notification for a single user and send them a push (if they
+ * have an fcmToken). Push failures are swallowed so they never break the flow.
+ */
+const notifyUser = async (
+  userId: Types.ObjectId | string | undefined,
+  title: string,
+  body: string,
+) => {
+  if (!userId) return;
+
+  await NotificationModel.create({
+    userId,
+    userMsgTittle: title,
+    userMsg: body,
+  });
+
+  const recipient = await UserModel.findById(userId).select("fcmToken");
+  if (recipient?.fcmToken) {
+    await sendPushNotificationToMultiple([recipient.fcmToken], {
+      title,
+      body,
+    }).catch((err) => console.error("Push notification error:", err));
+  }
+};
+
+/**
+ * Notify all of an owner's executors and authorizers (keepers).
+ * Keeper records are linked to a real User account by email + role; we resolve
+ * those accounts to create a DB notification and collect their FCM tokens.
+ */
+const notifyKeepers = async (
+  ownerUserId: Types.ObjectId | string,
+  title: string,
+  body: string,
+) => {
+  const keepers = await KeeperModel.find({
+    userId: ownerUserId,
+    isDeleted: false,
+  });
+
+  const tokens: string[] = [];
+
+  for (const keeper of keepers) {
+    const account = await UserModel.findOne({
+      email: keeper.email,
+      role: keeper.role,
+    }).select("_id fcmToken");
+
+    if (!account) continue;
+
+    await NotificationModel.create({
+      userId: account._id,
+      userMsgTittle: title,
+      userMsg: body,
+    });
+
+    if (account.fcmToken) tokens.push(account.fcmToken);
+  }
+
+  if (tokens.length > 0) {
+    await sendPushNotificationToMultiple(tokens, { title, body }).catch((err) =>
+      console.error("Push notification error:", err),
+    );
+  }
+};
 
 /**
  * Updates a user by ID.
@@ -276,13 +345,30 @@ const finalizeDeathStatus = async (userId: string) => {
         "deathReport.isPending": false,
       });
 
-      // Notify the reporter
-      await NotificationModel.create({
-        userId: user.deathReport.reportedBy,
-        userMsgTittle: "Death Report Finalized",
-        userMsg: `The death report for ${user.name} has been finalized after 24 hours of no response.`,
-      });
+      // Notify all executors and authorizers that there was no response in 24h
+      await notifyKeepers(
+        userId,
+        "Death Report Finalized",
+        `The death report for ${user.name} has been finalized after 24 hours of no response.`,
+      );
     }
+  }
+};
+
+/**
+ * Sweep all users with a pending death report and finalize any whose 24h
+ * window has elapsed. Run periodically by the scheduler (node-cron) so that
+ * finalization survives server restarts (unlike an in-process setTimeout).
+ */
+const sweepPendingDeathReports = async () => {
+  const pendingUsers = await UserModel.find({
+    "deathReport.isPending": true,
+  }).select("_id");
+
+  for (const pending of pendingUsers) {
+    await finalizeDeathStatus(String(pending._id)).catch((err) =>
+      console.error("Error finalizing death status:", err),
+    );
   }
 };
 
@@ -312,15 +398,15 @@ const reportDeath = async (reporterId: string, userId: string) => {
     { new: true },
   );
 
-  // Create notification for the user to respond within 24h
-  await NotificationModel.create({
-    userId: userId,
-    userMsgTittle: "Critical: Death Report Received",
-    userMsg: "A death report has been submitted for your account. If you are alive, please respond within 24 hours to decline this report, or your account will be marked as deceased.",
-  });
+  // Notify the user (DB + push) to respond within 24h
+  await notifyUser(
+    userId,
+    "Critical: Death Report Received",
+    "A death report has been submitted for your account. If you are alive, please respond within 24 hours to decline this report, or your account will be marked as deceased.",
+  );
 
-  // Schedule finalization
-  setTimeout(() => finalizeDeathStatus(userId), 24 * 60 * 60 * 1000);
+  // Finalization is handled by the scheduled sweep (see scheduler / cron),
+  // which marks the account deceased once 24h elapse with no response.
 
   return result;
 };
@@ -342,12 +428,12 @@ const respondToDeathReport = async (userId: string, isAlive: boolean) => {
       { new: true },
     );
 
-    // Notify the reporter that it was declined
-    await NotificationModel.create({
-      userId: user.deathReport.reportedBy,
-      userMsgTittle: "Death Report Declined",
-      userMsg: `${user.name} has responded and declined the death report.`,
-    });
+    // Notify all executors and authorizers that the user declined the report
+    await notifyKeepers(
+      userId,
+      "Death Report Declined",
+      `${user.name} has responded and declined the death report.`,
+    );
 
     return result;
   } else {
@@ -377,6 +463,7 @@ const UserService = {
   reportDeath,
   respondToDeathReport,
   finalizeDeathStatus,
+  sweepPendingDeathReports,
 };
 
 export { UserService };

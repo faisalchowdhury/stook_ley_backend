@@ -84,7 +84,7 @@ export const getMyNotification = catchAsync(
     }));
     if (formattedNotifications.length === 0) {
       return sendResponse(res, {
-        statusCode: httpStatus.NO_CONTENT,
+        statusCode: httpStatus.OK,
         success: true,
         message: "You have no notifications.",
         data: { notifications: [] },

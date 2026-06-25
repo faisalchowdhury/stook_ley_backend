@@ -9,7 +9,7 @@ export const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
 export const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
 // export const PORT = 8085; //------> production;
-export const PORT = 8080; //------> development;
+export const PORT = 6000; //------> development;
 export const DATABASE_URL = process.env.DATABASE_URL;
 export const JWT_SECRET_KEY = process.env.JWT_SECRET_KEY;
 export const Nodemailer_GMAIL = process.env.Nodemailer_GMAIL;
@@ -32,11 +32,12 @@ export const REDIS_PORT = 8002;
 export const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
 export const REDIS_DB = 0;
 export const ONE_SIGNAL_APP_ID = process.env.ONE_SIGNAL_APP_ID || "";
-export const ONE_SIGNAL_REST_API_KEY = process.env.ONE_SIGNAL_REST_API_KEY || "";
+export const ONE_SIGNAL_REST_API_KEY =
+  process.env.ONE_SIGNAL_REST_API_KEY || "";
 
 export const FIREBASE_SERVICE_ACCOUNT_PATH =
   process.env.FIREBASE_SERVICE_ACCOUNT_PATH ||
   path.resolve(
     process.cwd(),
-    "src/config/chorefit-ceefb-firebase-adminsdk-fbsvc-4d9a708a0d.json",
+    "src/config/legacy-keeper-f619b-firebase-adminsdk.json",
   );

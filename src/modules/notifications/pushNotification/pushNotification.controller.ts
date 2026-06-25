@@ -1,26 +1,10 @@
 // pushNotification.ts
-import admin from "firebase-admin";
-import path from "path";
-
-import { readFileSync } from "fs";
+// Importing the firebase config initializes the Admin SDK (singleton) as a side effect.
+import admin, { isFirebaseReady } from "../../../config/firebase";
 
 import { INotificationPayload } from "../notification.interface";
 import ApiError from "../../../errors/ApiError";
-import { FIREBASE_SERVICE_ACCOUNT_PATH } from "../../../config";
 import httpStatus from "http-status";
-
-// // Read and parse the Firebase service account JSON file
-// const serviceAccountBuffer = readFileSync(
-//   FIREBASE_SERVICE_ACCOUNT_PATH,
-//   "utf8"
-// );
-// const serviceAccount = JSON.parse(serviceAccountBuffer);
-
-// if (!admin.apps.length) {
-//   admin.initializeApp({
-//     credential: admin.credential.cert(serviceAccount),
-//   });
-// }
 
 export const sendPushNotification = async (
   fcmToken: string,
@@ -81,9 +65,13 @@ export const sendPushNotificationToMultiple = async (
   payload: INotificationPayload
 ): Promise<admin.messaging.BatchResponse> => {
   try {
+    if (!isFirebaseReady()) {
+      console.log("Firebase not initialized — skipping push notification.");
+      return { responses: [], successCount: 0, failureCount: 0 };
+    }
+
     // Filter out invalid tokens
     const validTokens = tokens.filter((token) => !!token);
-    7;
     if (validTokens.length === 0) {
       console.log("No valid tokens to send notifications to");
       return { responses: [], successCount: 0, failureCount: 0 };

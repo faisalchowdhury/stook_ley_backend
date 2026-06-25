@@ -12,6 +12,8 @@ export interface IUser extends Document {
   phone: string;
   password: string | null;
   role: string;
+  type: "apple" | "default";
+  fcmToken?: string;
   profilePicture: string;
   address: string;
   isVerified: boolean;

@@ -45,10 +45,14 @@ import mongoose from "mongoose";
 
 export const registerUser = async (req: Request, res: Response) => {
   try {
-    const { name, phone, email, password, role } = req.body;
+    const { name, phone, email, password, role, type, fcmToken } = req.body;
 
     // Validate password based on role
     const userRole = role || "user";
+
+    // Account type: "apple" or "default" (defaults to "default").
+    // Apple accounts are auto-verified — no email verification needed.
+    const accountType = type === "apple" ? "apple" : "default";
 
     // --- Role-Based Uniqueness Constraint ---
     // 1. Check for exact match (same email + same role)
@@ -60,7 +64,8 @@ export const registerUser = async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         statusCode: 400,
-        message: "Registration failed. Please check your details and try again.",
+        message:
+          "Registration failed. Please check your details and try again.",
         data: null,
       });
     }
@@ -77,13 +82,18 @@ export const registerUser = async (req: Request, res: Response) => {
         return res.status(400).json({
           success: false,
           statusCode: 400,
-          message: "Registration failed. Please check your details and try again.",
+          message:
+            "Registration failed. Please check your details and try again.",
           data: null,
         });
       }
     }
 
-    if ((userRole === "authorizer" || userRole === "executor") && !password) {
+    if (
+      accountType !== "apple" &&
+      (userRole === "authorizer" || userRole === "executor") &&
+      !password
+    ) {
       return res.status(400).json({
         success: false,
         statusCode: 400,
@@ -97,12 +107,19 @@ export const registerUser = async (req: Request, res: Response) => {
       phone,
       email,
       role: userRole,
-      isVerified: false,
+      type: accountType,
+      isVerified: accountType === "apple", // Apple accounts are verified automatically
       password: null, // Default to null
+      ...(fcmToken && { fcmToken }),
     };
 
-    // Only hash and save password for authorizer and executor roles
-    if ((userRole === "authorizer" || userRole === "executor") && password) {
+    // Only hash and save password for authorizer and executor roles.
+    // Apple accounts never store a password.
+    if (
+      accountType !== "apple" &&
+      (userRole === "authorizer" || userRole === "executor") &&
+      password
+    ) {
       const hashedPassword = await hashPassword(password);
       userPayload.password = hashedPassword;
     }
@@ -110,10 +127,12 @@ export const registerUser = async (req: Request, res: Response) => {
     // Create new user
     const newUser = await UserModel.create(userPayload);
 
-    // Generate, store and SEND OTP
-    const otp = generateOTP();
-    await saveOTP(email, otp);
-    await sendOTPEmailRegister(name, email, otp);
+    // Generate, store and SEND OTP — skipped for apple accounts (already verified)
+    if (accountType !== "apple") {
+      const otp = generateOTP();
+      await saveOTP(email, otp);
+      await sendOTPEmailRegister(name, email, otp);
+    }
 
     const token = generateToken({
       id: newUser._id,
@@ -173,7 +192,7 @@ const resendOTP = catchAsync(async (req: Request, res: Response) => {
 });
 
 export const loginUser = catchAsync(async (req: Request, res: Response) => {
-  const { email, password, role } = req.body;
+  const { email, password, role, fcmToken } = req.body;
 
   const query: any = { email };
   if (role) {
@@ -183,11 +202,42 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
   }
 
   const user: any = await UserModel.findOne(query);
+  console.log(user);
   if (!user || user.isDeleted) {
     throw new ApiError(401, "Invalid email or password.");
   }
 
   const userId = user._id as string;
+
+  // Update FCM token on login (if provided).
+  if (fcmToken) {
+    user.fcmToken = fcmToken;
+    await user.save();
+  }
+
+  // Apple accounts: passwordless login by email only (no password, no OTP).
+  if (user.type === "apple") {
+    const token = generateToken({
+      id: userId,
+      email: user.email,
+      role: user.role,
+    });
+    return sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Login complete!",
+      data: {
+        user: {
+          _id: user._id,
+          name: user?.name,
+          email: user?.email,
+          role: user?.role,
+          fcmToken: user?.fcmToken,
+        },
+        token,
+      },
+    });
+  }
 
   const verifyToken = generateToken({
     id: userId,
@@ -249,13 +299,42 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
 
 // Passwordless Login for User
 export const userLogin = catchAsync(async (req: Request, res: Response) => {
-  const { email } = req.body;
+  const { email, fcmToken } = req.body;
   if (!email) {
     throw new ApiError(400, "Please provide your email.");
   }
 
   // Specifically look for 'user' role for passwordless login
   const user = await UserModel.findOne({ email, role: "user" });
+
+  // Update FCM token on login (if provided).
+  if (user && !user.isDeleted && fcmToken) {
+    user.fcmToken = fcmToken;
+    await user.save();
+  }
+
+  // Apple accounts: log in directly with login info, no OTP verification.
+  if (user && !user.isDeleted && user.type === "apple") {
+    const token = generateToken({
+      id: user._id,
+      email: user.email,
+      role: user.role,
+    });
+    return sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Login successful",
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
+        token,
+      },
+    });
+  }
 
   // Always return the same response to prevent account enumeration
   if (user && !user.isDeleted) {

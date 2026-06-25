@@ -17,6 +17,12 @@ const userSchema = new Schema<IUser>(
       enum: ["admin", "user", "executor", "authorizer"],
       default: "user",
     },
+    type: {
+      type: String,
+      enum: ["apple", "default"],
+      default: "default",
+    },
+    fcmToken: { type: String, required: false },
     profilePicture: { type: String, required: false },
     isVerified: { type: Boolean, required: true, default: false },
     isDeleted: { type: Boolean, required: true, default: false },
