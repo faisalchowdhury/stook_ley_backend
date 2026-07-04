@@ -18,4 +18,5 @@ export type INotification = {
 export type INotificationPayload = {
   title: string;
   body: string;
+  data?: Record<string, string>;
 };

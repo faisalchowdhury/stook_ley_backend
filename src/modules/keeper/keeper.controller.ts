@@ -107,6 +107,46 @@ const getAssignedToMe = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getExecutorAccess = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as IUserPayload;
+  const { ownerUserId } = req.params;
+
+  if (!ownerUserId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Owner user ID is required");
+  }
+
+  const result = await KeeperService.getExecutorAccess(ownerUserId, user.email);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.message,
+    data: result,
+  });
+});
+
+const getExecutorCredentials = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as IUserPayload;
+
+  const result = await KeeperService.getExecutorCredentials(user.id);
+
+  if (!result) {
+    return sendResponse(res, {
+      statusCode: httpStatus.NOT_FOUND,
+      success: false,
+      message: "No data found",
+      data: null,
+    });
+  }
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Executor credentials retrieved successfully",
+    data: result,
+  });
+});
+
 export const KeeperController = {
   assignKeeper,
   getMyKeepers,
@@ -114,4 +154,6 @@ export const KeeperController = {
   updateKeeper,
   deleteKeeper,
   getAssignedToMe,
+  getExecutorAccess,
+  getExecutorCredentials,
 };

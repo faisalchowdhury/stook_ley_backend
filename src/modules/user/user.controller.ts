@@ -41,6 +41,26 @@ import { JwtPayloadWithUser } from "../../middlewares/userVerification";
 
 import mongoose from "mongoose";
 
+const loginUserPayload = (user: {
+  _id: unknown;
+  name?: string;
+  email?: string;
+  role?: string;
+  fcmToken?: string;
+  isDeath?: boolean;
+}) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  ...(user.fcmToken !== undefined && { fcmToken: user.fcmToken }),
+  ...(user.role === "user" && {
+    isDeath: Boolean(user.isDeath),
+    safeMode: Boolean(user.isDeath),
+    accountStatus: user.isDeath ? "deceased_locked" : "active",
+  }),
+});
+
 //  register User
 
 export const registerUser = async (req: Request, res: Response) => {
@@ -65,7 +85,7 @@ export const registerUser = async (req: Request, res: Response) => {
         success: false,
         statusCode: 400,
         message:
-          "Registration failed. Please check your details and try again.",
+          "An account with this email already exists. Please log in or use resend OTP.",
         data: null,
       });
     }
@@ -127,18 +147,34 @@ export const registerUser = async (req: Request, res: Response) => {
     // Create new user
     const newUser = await UserModel.create(userPayload);
 
-    // Generate, store and SEND OTP — skipped for apple accounts (already verified)
-    if (accountType !== "apple") {
-      const otp = generateOTP();
-      await saveOTP(email, otp);
-      await sendOTPEmailRegister(name, email, otp);
-    }
-
     const token = generateToken({
       id: newUser._id,
       email: newUser.email,
       role: newUser.role,
     });
+
+    // Generate, store and SEND OTP — skipped for apple accounts (already verified)
+    if (accountType !== "apple") {
+      const otp = generateOTP();
+      await saveOTP(email, otp);
+
+      try {
+        await sendOTPEmailRegister(name, email, otp);
+      } catch (emailError) {
+        console.error("Registration OTP email failed:", emailError);
+        return res.status(200).json({
+          success: true,
+          statusCode: 200,
+          message:
+            "User registered successfully, but the verification email could not be sent. Please use resend OTP.",
+          data: {
+            user: newUser,
+            token,
+            emailSent: false,
+          },
+        });
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -147,6 +183,7 @@ export const registerUser = async (req: Request, res: Response) => {
       data: {
         user: newUser,
         token,
+        emailSent: accountType === "apple" ? null : true,
       },
     });
   } catch (error: any) {
@@ -165,7 +202,7 @@ const resendOTP = catchAsync(async (req: Request, res: Response) => {
 
   const isExist: any = await UserModel.findOne({ email });
   if (!isExist) {
-    sendResponse(res, {
+    return sendResponse(res, {
       statusCode: 401,
       success: false,
       message: "User not found",
@@ -174,7 +211,7 @@ const resendOTP = catchAsync(async (req: Request, res: Response) => {
   }
 
   const otp = generateOTP();
-  await sendOTPEmailRegister(isExist.firstName, email, String(otp));
+  await sendOTPEmailRegister(isExist.name, email, String(otp));
   // await UserService.sendPhoneVerification(email, otp);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 60 * 1000);
@@ -198,7 +235,7 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
   if (role) {
     query.role = role;
   } else {
-    query.role = { $in: ["admin", "authorizer", "executor"] };
+    query.role = { $in: ["admin", "authorizer", "executor" ] };
   }
 
   const user: any = await UserModel.findOne(query);
@@ -209,8 +246,8 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
 
   const userId = user._id as string;
 
-  // Update FCM token on login (if provided).
-  if (fcmToken) {
+  // Update FCM token on login (if provided). Skip for locked profiles.
+  if (fcmToken && !user.isDeath) {
     user.fcmToken = fcmToken;
     await user.save();
   }
@@ -227,13 +264,7 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
       success: true,
       message: "Login complete!",
       data: {
-        user: {
-          _id: user._id,
-          name: user?.name,
-          email: user?.email,
-          role: user?.role,
-          fcmToken: user?.fcmToken,
-        },
+        user: loginUserPayload(user),
         token,
       },
     });
@@ -244,7 +275,7 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
     email: user.email,
     role: user.role,
   });
-  if (!user.isVerified) {
+  if (!user.isVerified && user.role === "user") {
     const name = user.name as string;
     const otp = generateOTP();
     sendOTPEmailVerification(name, email, otp).catch((err) => {
@@ -274,6 +305,10 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(401, "Invalid email or password.");
   }
 
+  if (!user.isVerified) {
+    user.isVerified = true;
+  }
+
   const token = generateToken({
     id: userId,
     email: user.email,
@@ -284,12 +319,7 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
     success: true,
     message: "Login complete!",
     data: {
-      user: {
-        _id: user._id,
-        name: user?.name,
-        email: user?.email,
-        role: user?.role,
-      },
+      user: loginUserPayload(user),
       token,
     },
   });
@@ -307,8 +337,8 @@ export const userLogin = catchAsync(async (req: Request, res: Response) => {
   // Specifically look for 'user' role for passwordless login
   const user = await UserModel.findOne({ email, role: "user" });
 
-  // Update FCM token on login (if provided).
-  if (user && !user.isDeleted && fcmToken) {
+  // Update FCM token on login (if provided). Skip for locked profiles.
+  if (user && !user.isDeleted && fcmToken && !user.isDeath) {
     user.fcmToken = fcmToken;
     await user.save();
   }
@@ -325,12 +355,7 @@ export const userLogin = catchAsync(async (req: Request, res: Response) => {
       success: true,
       message: "Login successful",
       data: {
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
+        user: loginUserPayload(user),
         token,
       },
     });
@@ -347,7 +372,14 @@ export const userLogin = catchAsync(async (req: Request, res: Response) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "If this email is registered, an OTP has been sent.",
-    data: null,
+    data:
+      user && !user.isDeleted
+        ? {
+            isDeath: Boolean(user.isDeath),
+            safeMode: Boolean(user.isDeath),
+            accountStatus: user.isDeath ? "deceased_locked" : "active",
+          }
+        : null,
   });
 });
 
@@ -369,8 +401,8 @@ export const verifyUserOTP = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(httpStatus.NOT_FOUND, "User not found!");
   }
 
-  // Mark as verified if not already
-  if (!user.isVerified) {
+  // Mark as verified if not already (skip profile writes for locked accounts).
+  if (!user.isVerified && !user.isDeath) {
     user.isVerified = true;
     await user.save();
   }
@@ -389,12 +421,7 @@ export const verifyUserOTP = catchAsync(async (req: Request, res: Response) => {
     success: true,
     message: "Login successful",
     data: {
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: loginUserPayload(user),
       token,
     },
   });
@@ -463,12 +490,15 @@ export const resetPassword = catchAsync(async (req: Request, res: Response) => {
 export const verifyOTP = catchAsync(async (req: Request, res: Response) => {
   const { otp } = req.body;
   try {
-    const { token, name, email } = await UserService.verifyOTPService(
+    const { token, name, userId } = await UserService.verifyOTPService(
       otp,
       req.headers.authorization as string,
     );
 
-    const user = (await UserModel.findOne({ email })) as any;
+    const user = (await UserModel.findById(userId)) as any;
+    if (!user) {
+      throw new ApiError(httpStatus.NOT_FOUND, "User not found!");
+    }
     // Mark user as verified, if needed
     if (!user.isVerified) {
       user.isVerified = true;
@@ -550,7 +580,13 @@ export const getSelfInfo = catchAsync(async (req: Request, res: Response) => {
       profilePicture: userData.profilePicture || null,
       role: userData.role,
       isDeath: userData.isDeath,
+      safeMode: userData.isDeath,
       deathReport: userData.deathReport,
+      accountStatus: userData.isDeath
+        ? "deceased_locked"
+        : userData.deathReport?.isPending
+          ? "death_pending"
+          : "active",
       partner: partner || null,
       children: children || [],
     };
@@ -604,7 +640,7 @@ export const deleteUser = catchAsync(async (req: Request, res: Response) => {
     if (deleteableuser.isDeleted) {
       throw new ApiError(404, "This account is already deleted.");
     }
-    if ((req.user as IUserPayload)?.id !== id) {
+    if ((req.user as IUserPayload)?.id !== id && (req.user as IUserPayload)?.role !== "admin") {
       throw new ApiError(
         403,
         "You cannot delete this account. Please contact support",
@@ -802,6 +838,7 @@ const getAllUsers = catchAsync(async (req: Request, res: Response) => {
       role: user.role,
       phone: user.phone,
       address: user.address,
+      isDeleted: user.isDeleted,
       //isRequest: user.isRequest,
       managerInfo: user.managerInfoId
         ? {

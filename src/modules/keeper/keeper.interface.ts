@@ -9,5 +9,6 @@ export interface IKeeper {
   contactNumber: string;
   devicePassword?: string;
   appPin?: string;
+  executorAccessReleasedAt?: Date;
   isDeleted: boolean;
 }

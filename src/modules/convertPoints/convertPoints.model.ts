@@ -6,6 +6,7 @@ export interface IConvertPoints extends Document {
   solana_wallet_address: string;
   amount: number;
   status: "pending" | "approved" | "rejected";
+  isPointsDeducted: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,6 +22,7 @@ const ConvertPointsSchema = new Schema<IConvertPoints>(
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
+    isPointsDeducted: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

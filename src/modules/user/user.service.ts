@@ -7,7 +7,7 @@ import { OTPModel, UserModel } from "./user.model";
 import crypto from "crypto";
 import ApiError from "../../errors/ApiError";
 
-import { findUserByEmail, generateOTP, hashPassword } from "./user.utils";
+import { findUserByEmail, generateOTP, hashPassword, sendExecutorAccessEmail } from "./user.utils";
 
 import httpStatus from "http-status";
 import { generateToken, verifyToken } from "../../utils/JwtToken";
@@ -25,6 +25,7 @@ import { JwtPayloadWithUser } from "../../middlewares/userVerification";
 import { NotificationModel } from "../notifications/notification.model";
 import { KeeperModel } from "../keeper/keeper.model";
 import { sendPushNotificationToMultiple } from "../notifications/pushNotification/pushNotification.controller";
+import { resolveStoredCredential } from "../../utils/credentialEncryption";
 
 /**
  * Create a DB notification for a single user and send them a push (if they
@@ -34,6 +35,7 @@ const notifyUser = async (
   userId: Types.ObjectId | string | undefined,
   title: string,
   body: string,
+  data?: Record<string, string>,
 ) => {
   if (!userId) return;
 
@@ -43,12 +45,15 @@ const notifyUser = async (
     userMsg: body,
   });
 
-  const recipient = await UserModel.findById(userId).select("fcmToken");
+  const recipient = await UserModel.findById(userId).select("fcmToken name");
   if (recipient?.fcmToken) {
     await sendPushNotificationToMultiple([recipient.fcmToken], {
       title,
       body,
+      data,
     }).catch((err) => console.error("Push notification error:", err));
+  } else {
+    console.warn(`No FCM token for user ${userId} — push skipped.`);
   }
 };
 
@@ -61,6 +66,7 @@ const notifyKeepers = async (
   ownerUserId: Types.ObjectId | string,
   title: string,
   body: string,
+  data?: Record<string, string>,
 ) => {
   const keepers = await KeeperModel.find({
     userId: ownerUserId,
@@ -87,9 +93,80 @@ const notifyKeepers = async (
   }
 
   if (tokens.length > 0) {
-    await sendPushNotificationToMultiple(tokens, { title, body }).catch((err) =>
-      console.error("Push notification error:", err),
+    await sendPushNotificationToMultiple(tokens, { title, body, data }).catch(
+      (err) => console.error("Push notification error:", err),
     );
+  }
+};
+
+/**
+ * When a user is confirmed deceased, notify assigned executors and release
+ * device/app credentials stored on their keeper record.
+ */
+const releaseExecutorAccess = async (
+  ownerUserId: Types.ObjectId | string,
+) => {
+  const owner = await UserModel.findById(ownerUserId).select(
+    "name email phone isDeath",
+  );
+  if (!owner?.isDeath) return;
+
+  const executors = await KeeperModel.find({
+    userId: ownerUserId,
+    role: "executor",
+    isDeleted: false,
+  });
+
+  for (const keeper of executors) {
+    const devicePassword = resolveStoredCredential(keeper.devicePassword);
+    const appPassword = resolveStoredCredential(keeper.appPin);
+
+    const account = await UserModel.findOne({
+      email: keeper.email,
+      role: "executor",
+    }).select("_id fcmToken name email");
+
+    const title = "Executor Access Ready";
+    const body = `The account of ${owner.name} is now in Safe Mode. Open the Executor section to access login credentials.`;
+
+    if (account) {
+      await NotificationModel.create({
+        userId: account._id,
+        userMsgTittle: title,
+        userMsg: body,
+      });
+
+      if (account.fcmToken) {
+        await sendPushNotificationToMultiple([account.fcmToken], {
+          title,
+          body,
+          data: {
+            type: "executor_access_ready",
+            ownerUserId: String(ownerUserId),
+            action: "view_executor_access",
+          },
+        }).catch((err) => console.error("Push notification error:", err));
+      }
+    }
+
+    if (!keeper.executorAccessReleasedAt) {
+      await KeeperModel.findByIdAndUpdate(keeper._id, {
+        executorAccessReleasedAt: new Date(),
+      });
+    }
+
+    if (account?.email && devicePassword && appPassword) {
+      await sendExecutorAccessEmail(
+        keeper.fullName,
+        account.email,
+        owner.name,
+        owner.phone,
+        devicePassword,
+        appPassword,
+      ).catch((err) =>
+        console.error("Executor access email error:", err),
+      );
+    }
   }
 };
 
@@ -247,6 +324,7 @@ const getUserList = async (
         createdAt: 1,
         phone: 1,
         address: 1,
+        isDeleted: 1,
         isRequest: 1,
         managerInfoId: 1,
         _id: 1,
@@ -282,7 +360,7 @@ const verifyOTPService = async (otp: string, authorizationHeader: string) => {
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid or expired OTP");
   }
 
-  const user = await UserModel.findOne({ email });
+  const user = await UserModel.findById(decoded.id);
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, "User not found!");
   }
@@ -297,6 +375,7 @@ const verifyOTPService = async (otp: string, authorizationHeader: string) => {
     token,
     name: user.name,
     email: user.email,
+    userId: user._id,
   };
 };
 
@@ -345,12 +424,17 @@ const finalizeDeathStatus = async (userId: string) => {
         "deathReport.isPending": false,
       });
 
-      // Notify all executors and authorizers that there was no response in 24h
       await notifyKeepers(
         userId,
         "Death Report Finalized",
-        `The death report for ${user.name} has been finalized after 24 hours of no response.`,
+        `The death report for ${user.name} has been finalized after 24 hours of no response. The account is now in Safe Mode.`,
+        {
+          type: "death_finalized",
+          ownerUserId: String(userId),
+        },
       );
+
+      await releaseExecutorAccess(userId);
     }
   }
 };
@@ -386,6 +470,25 @@ const reportDeath = async (reporterId: string, userId: string) => {
     throw new ApiError(httpStatus.BAD_REQUEST, "A death report is already pending for this user");
   }
 
+  const reporter = await UserModel.findById(reporterId).select("name role email");
+  if (!reporter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Reporter not found");
+  }
+
+  const assignedKeeper = await KeeperModel.findOne({
+    userId,
+    email: reporter.email,
+    role: reporter.role,
+    isDeleted: false,
+  });
+
+  if (!assignedKeeper) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "You are not assigned as a keeper for this user.",
+    );
+  }
+
   const result = await UserModel.findByIdAndUpdate(
     userId,
     {
@@ -398,15 +501,20 @@ const reportDeath = async (reporterId: string, userId: string) => {
     { new: true },
   );
 
-  // Notify the user (DB + push) to respond within 24h
+  const reporterLabel = `${reporter.name} (${reporter.role})`;
+
+  // Notify the reported user (DB + FCM push) — respond within 24h
   await notifyUser(
     userId,
-    "Critical: Death Report Received",
-    "A death report has been submitted for your account. If you are alive, please respond within 24 hours to decline this report, or your account will be marked as deceased.",
+    "Death Report Alert",
+    `You have been reported as deceased by ${reporterLabel}. If you are alive, please respond within 24 hours in the Legacy Keeper app.`,
+    {
+      type: "death_report",
+      userId: String(userId),
+      action: "respond_to_death",
+      status: "pending",
+    },
   );
-
-  // Finalization is handled by the scheduled sweep (see scheduler / cron),
-  // which marks the account deceased once 24h elapse with no response.
 
   return result;
 };
@@ -446,6 +554,19 @@ const respondToDeathReport = async (userId: string, isAlive: boolean) => {
       },
       { new: true },
     );
+
+    await notifyKeepers(
+      userId,
+      "Death Confirmed",
+      `${user.name} has confirmed the death report. The account is now in Safe Mode.`,
+      {
+        type: "death_finalized",
+        ownerUserId: String(userId),
+      },
+    );
+
+    await releaseExecutorAccess(userId);
+
     return result;
   }
 };

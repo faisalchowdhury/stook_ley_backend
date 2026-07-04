@@ -27,14 +27,27 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+const allowedOrigins = [
+  CLIENT_URL,
+  "http://localhost:5173",
+  "https://legacy-keeper.app",
+  "https://dashboard.legacy-keeper.app",
+  "https://www.legacy-keeper.app",
+  "https://faisal4004.merinasib.shop",
+  "https://faisal4003.merinasib.shop"
+];
+
 app.use(
   cors({
-    origin: [
-      "*",
-      "https://legacy-keeper.app",
-      "https://dashboard.legacy-keeper.app",
-      "https://www.legacy-keeper.app/",
-    ],
+    origin: (origin, callback) => {
+      // Allow non-browser clients (Postman, mobile apps) with no Origin header
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
+    credentials: true,
   }),
 );
 

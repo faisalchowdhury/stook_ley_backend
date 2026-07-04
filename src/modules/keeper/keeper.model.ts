@@ -15,6 +15,7 @@ const keeperSchema = new Schema<IKeeper>(
     contactNumber: { type: String, required: true },
     devicePassword: { type: String },
     appPin: { type: String },
+    executorAccessReleasedAt: { type: Date },
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true },

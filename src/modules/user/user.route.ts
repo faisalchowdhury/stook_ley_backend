@@ -15,6 +15,7 @@ import {
 
 import upload from "../../multer/multer";
 import { guardRole } from "../../middlewares/roleGuard";
+import { PointsController } from "../points/points.controller";
 
 const router = express.Router();
 export const uploadImages = upload.fields([
@@ -43,6 +44,11 @@ router.get(
   guardRole(["admin", "user", "executor", "authorizer"]),
   getSelfInfo,
 );
+router.get(
+  "/my-points",
+  guardRole(["user"]),
+  PointsController.getMyPoints,
+);
 router.delete("/account-delete", guardRole(["admin", "user"]), deleteUser);
 router.post("/change-password", guardRole(["admin", "user"]), changePassword);
 router.post("/resend-otp", UserController.resendOTP);
@@ -60,6 +66,11 @@ router.post("/resend-otp", UserController.resendOTP);
 
 // router.post("/admin-login", UserController.adminloginUser);
 router.get("/user-list", guardRole(["admin"]), UserController.getAllUsers);
+router.get(
+  "/user-list-with-points",
+  guardRole(["admin"]),
+  PointsController.getUsersWithPoints,
+);
 
 // // router.put(
 // //   "/update-admin-info",

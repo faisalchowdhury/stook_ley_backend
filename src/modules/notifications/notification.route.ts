@@ -9,8 +9,8 @@ import { guardRole } from "../../middlewares/roleGuard";
 
 const router = express.Router();
 
-router.get("/", guardRole(["admin", "user"]), getMyNotification);
-router.get("/badge-count", guardRole(["admin", "user"]), getUnreadBadgeCount);
+router.get("/", guardRole(["admin", "user", "executor", "authorizer"]), getMyNotification);
+router.get("/badge-count", guardRole(["admin", "user", "executor", "authorizer"]), getUnreadBadgeCount);
 router.post("/send-push", guardRole("admin"), adminSendPushNotification);
 
 //-----> inpout

@@ -13,6 +13,7 @@ import express, { Application, NextFunction, Request, Response } from "express";
 import { verifySocketToken } from "./JwtToken";
 import ApiError from "../errors/ApiError";
 import httpStatus from "http-status";
+import { CLIENT_URL } from "../config";
 const app: Application = express();
 
 declare module "socket.io" {
@@ -34,7 +35,7 @@ const sendResponse = (
   statusCode: number,
   status: string,
   message: string,
-  data?: any
+  data?: any,
 ) => ({
   statusCode,
   status,
@@ -49,9 +50,16 @@ export const initSocketIO = async (server: HttpServer): Promise<void> => {
 
   io = new Server(server, {
     cors: {
-      origin: "*", // Replace with your client's origin
+      origin: [
+        CLIENT_URL,
+        "http://localhost:5173",
+        "https://legacy-keeper.app",
+        "https://dashboard.legacy-keeper.app",
+        "https://www.legacy-keeper.app",
+        "https://faisal4004.merinasib.shop",
+        "https://faisal4003.merinasib.shop"
+      ],
       methods: ["GET", "POST"],
-      allowedHeaders: ["my-custom-header"], // Add any custom headers if needed
       credentials: true,
     },
   });
@@ -69,8 +77,8 @@ export const initSocketIO = async (server: HttpServer): Promise<void> => {
       return next(
         new ApiError(
           httpStatus.UNAUTHORIZED,
-          "Authentication error: Token missing"
-        )
+          "Authentication error: Token missing",
+        ),
       );
     }
 
@@ -101,7 +109,7 @@ export const initSocketIO = async (server: HttpServer): Promise<void> => {
     if (socket.user && socket.user._id) {
       connectedUsers.set(socket.user._id.toString(), { socketID: socket.id });
       console.log(
-        `Registered user ${socket.user._id.toString()} with socket ID: ${socket.id}`
+        `Registered user ${socket.user._id.toString()} with socket ID: ${socket.id}`,
       );
     }
 
@@ -113,7 +121,7 @@ export const initSocketIO = async (server: HttpServer): Promise<void> => {
 
     socket.on("disconnect", () => {
       console.log(
-        `${socket.user?.name} || ${socket.user?.email} || ${socket.user?._id} just disconnected with socket ID: ${socket.id}`
+        `${socket.user?.name} || ${socket.user?.email} || ${socket.user?._id} just disconnected with socket ID: ${socket.id}`,
       );
 
       // Remove user from connectedUsers map

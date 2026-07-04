@@ -1,387 +1,271 @@
 import crypto from "crypto";
 import { OTPModel, UserModel } from "./user.model";
-import { Nodemailer_GMAIL, Nodemailer_GMAIL_PASSWORD } from "../../config";
+import {
+  SMTP_FROM,
+  SMTP_HOST,
+  SMTP_PASSWORD,
+  SMTP_PORT,
+  SMTP_USER,
+  BRAND_URL,
+} from "../../config";
 
 import nodemailer from "nodemailer";
 import { IUser } from "./user.interface";
 
 import argon2 from "argon2";
 import ApiError from "../../errors/ApiError";
+import { buildEmailTemplate, emailHelpers, getEmailLogoAttachments } from "../../utils/emailTemplate";
+
+const createMailTransporter = () => {
+  if (!SMTP_USER || !SMTP_PASSWORD) {
+    throw new ApiError(500, "Email service is not configured.");
+  }
+
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASSWORD,
+    },
+  });
+};
+
+const sendEmail = async (options: {
+  to: string | string[];
+  subject: string;
+  html: string;
+}): Promise<void> => {
+  const transporter = createMailTransporter();
+
+  try {
+    await transporter.sendMail({
+      from: SMTP_FROM,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      attachments: getEmailLogoAttachments(),
+    });
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    throw new ApiError(500, "Unexpected error occurred during email sending.");
+  }
+};
 
 export const sendOTPEmailRegister = async (
   name: string,
   email: string,
   otp: string,
 ): Promise<void> => {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    secure: true,
-    auth: {
-      user: Nodemailer_GMAIL,
-      pass: Nodemailer_GMAIL_PASSWORD,
-    },
+  const html = buildEmailTemplate({
+    preheader: `Your ${process.env.AppName} registration code is ${otp}`,
+    greeting: `Hello ${name}!`,
+    body: `
+      ${emailHelpers.paragraph("Thank you for registering. Use the verification code below to complete your account setup.")}
+      ${emailHelpers.otpBlock(otp, "Registration code")}
+      ${emailHelpers.paragraph("If you did not create an account, no further action is required.")}
+    `,
   });
 
-  const emailContent = `
-       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
-      <h1 style="text-align: center; color:#111111 font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
-       ${process.env.AppName}
-      </h1>
-      <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
-        <h2 style="color: #111111; text-align: center; font-size: 24px; font-weight: bold;">Hello ${name}!</h2>
-        <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6;">You are receiving this email because we received a registration request for your account.</p>
-        
-        <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #111111; color: white; border-radius: 8px; font-size: 24px; font-weight: bold;">
-          <h3 style="margin: 0; color:#FFFFFF" >Your OTP is: <strong>${otp}</strong></h3>
-        </div>
-        
-        <p style="text-align: center; color: #e10600; font-weight: bold; font-size: 14px; margin-top: 20px;">This OTP will expire in 3 minutes.</p>
-        <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">If you did not request this, no further action is required.</p>
-        <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">Regards,<br>${process.env.AppName}</p>
-      </div>
-      
-      <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">If you're having trouble copying the OTP, please try again.</p>
-    </div>
-    
-      `;
-
-  const mailOptions = {
-    from: "nodemailerapptest@gmail.com",
+  await sendEmail({
     to: email,
     subject: "Registration OTP",
-    html: emailContent,
-  };
-  try {
-    await transporter.sendMail(mailOptions);
-  } catch (error) {
-    console.error("Unexpected error:", error);
-    throw new ApiError(500, "Unexpected error occurred during email sending.");
-  }
+    html,
+  });
 };
+
 export const sendOTPEmailVerification = async (
   name: string,
   email: string,
   otp: string,
 ): Promise<void> => {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    secure: true,
-    auth: {
-      user: Nodemailer_GMAIL,
-      pass: Nodemailer_GMAIL_PASSWORD,
-    },
+  const html = buildEmailTemplate({
+    preheader: `Verify your ${process.env.AppName} account with code ${otp}`,
+    greeting: `Hello ${name}!`,
+    body: `
+      ${emailHelpers.paragraph("Your account is not yet verified. Please use the code below to complete verification.")}
+      ${emailHelpers.otpBlock(otp, "Verification code")}
+      ${emailHelpers.paragraph("If you did not request this, please ignore this email.")}
+    `,
   });
 
-  const emailContent = `
-       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
-      <h1 style="text-align: center; color:#111111; font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
-       ${process.env.AppName}
-      </h1>
-      <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
-        <h2 style="color: #111111; text-align: center; font-size: 24px; font-weight: bold;">Hello ${name}!</h2>
-        <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6;">Your account is not yet verified. Please use the OTP below to complete your verification.</p>
-        
-        <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #111111; color: white; border-radius: 8px; font-size: 24px; font-weight: bold;">
-          <h3 style="margin: 0; color:#FFFFFF" >Your OTP is: <strong>${otp}</strong></h3>
-        </div>
-        
-        <p style="text-align: center; color: #e10600; font-weight: bold; font-size: 14px; margin-top: 20px;">This OTP will expire in 3 minutes.</p>
-        <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">If you did not request this, please ignore this email.</p>
-        <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">Regards,<br>${process.env.AppName}</p>
-      </div>
-      
-      <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">If you're having trouble copying the OTP, please try again.</p>
-    </div>
-  `;
-
-  const mailOptions = {
-    from: "nodemailerapptest@gmail.com",
+  await sendEmail({
     to: email,
     subject: "Verify Your Account - OTP",
-    html: emailContent,
-  };
-  try {
-    await transporter.sendMail(mailOptions);
-  } catch (error) {
-    console.error("Unexpected error:", error);
-    throw new ApiError(500, "Unexpected error occurred during email sending.");
-  }
+    html,
+  });
 };
 
-// inform authorizer and executor email notify on assigned
 export const sendAssignedNotify = async (
   name: string,
   email: string,
   role: string,
   assignerName: string,
 ): Promise<void> => {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    secure: true,
-    auth: {
-      user: Nodemailer_GMAIL,
-      pass: Nodemailer_GMAIL_PASSWORD,
-    },
+  const html = buildEmailTemplate({
+    preheader: `You have been assigned as ${role} on ${process.env.AppName}`,
+    greeting: `Hello ${name}!`,
+    body: `
+      ${emailHelpers.paragraph(
+        `You have been assigned as ${emailHelpers.highlight(role)} by ${emailHelpers.highlight(assignerName)}.`,
+      )}
+      ${emailHelpers.paragraph("Sign in to your account to view your responsibilities and get started.")}
+      ${emailHelpers.ctaButton("Open Legacy Keeper", BRAND_URL)}
+      ${emailHelpers.paragraph("If you did not expect this assignment, please contact your administrator.")}
+    `,
+    footerNote: "This is an automated notification from Legacy Keeper.",
   });
 
-  const emailContent = `
-  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
-    <h1 style="text-align: center; color:#111111; font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
-      ${process.env.AppName}
-    </h1>
-    <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
-      <h2 style="color: #111111; text-align: center; font-size: 24px; font-weight: bold;">Hello ${name}!</h2>
-      
-      <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">
-        You have been assigned as <strong style="color: #111111;">${role}</strong> by <strong style="color: #111111;">${assignerName}</strong>.
-      </p>
-      
-     
-      
-      <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #111111; color: white; border-radius: 8px; font-size: 24px; font-weight: bold;">
-        <h3 style="margin: 0; color:#FFFFFF">Legecy Keeper link : https://legacy-keeper.com</strong></h3>
-      </div>
-      
-      <p style="text-align: center; color: #e10600; font-weight: bold; font-size: 14px; margin-top: 20px;">This OTP will expire in 3 minutes.</p>
-      <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">If you did not request this, please contact your administrator.</p>
-      <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">Regards,<br>${process.env.AppName}</p>
-    </div>
-    
-    <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">If you're having trouble copying the OTP, please try again.</p>
-  </div>
-`;
-
-  const mailOptions = {
-    from: "nodemailerapptest@gmail.com",
+  await sendEmail({
     to: email,
-    subject: "Verify Your Account - OTP",
-    html: emailContent,
-  };
-  try {
-    await transporter.sendMail(mailOptions);
-  } catch (error) {
-    console.error("Unexpected error:", error);
-    throw new ApiError(500, "Unexpected error occurred during email sending.");
-  }
+    subject: "You've Been Assigned a Role",
+    html,
+  });
+};
+
+export const sendExecutorAccessEmail = async (
+  executorName: string,
+  email: string,
+  deceasedName: string,
+  deceasedPhone: string,
+  devicePassword: string,
+  appPassword: string,
+): Promise<void> => {
+  const html = buildEmailTemplate({
+    preheader: `Executor access is ready for ${deceasedName}`,
+    greeting: `Hello ${executorName}!`,
+    body: `
+      ${emailHelpers.paragraph(
+        `The account of ${emailHelpers.highlight(deceasedName)} has been confirmed deceased and is now in Safe Mode.`,
+      )}
+      ${emailHelpers.paragraph(
+        `Log in to the device of ${emailHelpers.highlight(deceasedName)} using the details below:`,
+      )}
+      ${emailHelpers.infoCard([
+        { label: "Phone", value: deceasedPhone },
+        { label: "Device password", value: devicePassword },
+        { label: "App password", value: appPassword },
+      ])}
+      ${emailHelpers.paragraph(
+        "Open the Legacy Keeper app and go to the Executor section to manage this account.",
+      )}
+      ${emailHelpers.ctaButton("Open Legacy Keeper", BRAND_URL)}
+    `,
+    footerNote: "This is a secure executor notification from Legacy Keeper.",
+  });
+
+  await sendEmail({
+    to: email,
+    subject: `Executor access ready — ${deceasedName}`,
+    html,
+  });
 };
 
 export const getStoredOTP = async (email: string): Promise<string | null> => {
   const otpRecord = await OTPModel.findOne({ email });
   return otpRecord ? otpRecord.otp : null;
 };
+
 export const sendOTPEmail = async (
   email: string,
   otp: string,
 ): Promise<void> => {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    secure: true,
-    auth: {
-      user: Nodemailer_GMAIL,
-      pass: Nodemailer_GMAIL_PASSWORD,
-    },
+  const html = buildEmailTemplate({
+    preheader: `Your verification code is ${otp}`,
+    greeting: "Hello!",
+    body: `
+      ${emailHelpers.paragraph("You are receiving this email because we received a registration request for your account.")}
+      ${emailHelpers.otpBlock(otp)}
+      ${emailHelpers.paragraph("If you did not request this, no further action is required.")}
+    `,
   });
 
-  const emailContent = `
-  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
-    <h1 style="text-align: center; color: #1a3d6d; font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
-      Shower<span style="color:#00c38a; font-size: 0.9em;">share</span>
-    </h1>
-    <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
-      <h2 style="color:#111111; text-align: center; font-size: 24px; font-weight: bold;">Hello!</h2>
-      <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6;">You are receiving this email because we received a registration request for your account.</p>
-      
-      <div style="text-align: center; margin: 30px 0; padding: 20px; background-color:#111111; color: white; border-radius: 8px; font-size: 24px; font-weight: bold;">
-        <h3 style="margin: 0;">Your OTP is: <strong>${otp}</strong></h3>
-      </div>
-      
-      <p style="text-align: center; color: #e10600; font-weight: bold; font-size: 14px; margin-top: 20px;">This OTP will expire in 3 minutes.</p>
-      <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">If you did not request this, no further action is required.</p>
-      <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">Regards,<br>${process.env.AppName}</p>
-    </div>
-    
-    <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">If you're having trouble copying the OTP, please try again.</p>
-  </div>
-  
-  
-    `;
-
-  const mailOptions = {
-    from: "nodemailerapptest@gmail.com",
+  await sendEmail({
     to: email,
     subject: "Registration OTP",
-    html: emailContent,
-  };
-  try {
-    await transporter.sendMail(mailOptions);
-  } catch (error) {
-    console.error("Unexpected error:", error);
-    throw new ApiError(500, "Unexpected error occurred during email sending.");
-  }
+    html,
+  });
 };
 
 export const resendOTPEmail = async (
   email: string,
   otp: string,
-  // name: string,
 ): Promise<void> => {
   try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      secure: true,
-      auth: {
-        user: Nodemailer_GMAIL,
-        pass: Nodemailer_GMAIL_PASSWORD,
-      },
+    const html = buildEmailTemplate({
+      preheader: `Your new verification code is ${otp}`,
+      greeting: "Hello!",
+      body: `
+        ${emailHelpers.paragraph("We received a request for a new verification code. Use the code below to continue.")}
+        ${emailHelpers.otpBlock(otp, "New verification code")}
+        ${emailHelpers.paragraph("If you did not request this, please ignore this email.")}
+      `,
     });
 
-    const emailContent = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
-      <h1 style="text-align: center; color: #1a3d6d; font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
-       ${process.env.AppName}
-      </h1>
-      <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
-        <h2 style="color:#111111; text-align: center; font-size: 24px; font-weight: bold;">Hello!</h2>
-        <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6;">
-          We noticed you requested another OTP for verification. Use the code below to complete your process.
-        </p>
-        
-        <div style="text-align: center; margin: 30px 0; padding: 20px; background-color:#111111; color: white; border-radius: 8px; font-size: 24px; font-weight: bold;">
-          <h3 style="margin: 0; color: #FFFFFF">Your New OTP is: <strong>${otp}</strong></h3>
-        </div>
-        
-        <p style="text-align: center; color: #e10600; font-weight: bold; font-size: 14px; margin-top: 20px;">
-          This OTP will expire in 3 minutes.
-        </p>
-        <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">
-          If you did not request this, please ignore this email.
-        </p>
-        <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">
-          Regards,<br>${process.env.AppName}
-        </p>
-      </div>
-      
-      <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">
-        If you're having trouble copying the OTP, please try again.
-      </p>
-    </div>
-    `;
-
-    const mailOptions = {
-      from: "nodemailerapptest@gmail.com",
+    await sendEmail({
       to: email,
-      subject: "Resend OTP ",
-      html: emailContent,
-    };
-
-    await transporter.sendMail(mailOptions);
+      subject: "Resend OTP",
+      html,
+    });
   } catch (error) {
     console.error(`Error sending OTP email to ${email}:`, error);
     throw new ApiError(500, "Unexpected error occurred during email sending.");
   }
 };
+
 export const sendResetOTPEmail = async (
   email: string,
   otp: string,
   name: string,
 ): Promise<void> => {
   try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      secure: true,
-      auth: {
-        user: Nodemailer_GMAIL,
-        pass: Nodemailer_GMAIL_PASSWORD,
-      },
+    const html = buildEmailTemplate({
+      preheader: `Reset your password with code ${otp}`,
+      greeting: `Hello ${name}!`,
+      body: `
+        ${emailHelpers.paragraph("We received a password reset request for your account. Use the code below to proceed.")}
+        ${emailHelpers.otpBlock(otp, "Password reset code")}
+        ${emailHelpers.paragraph("If you did not request a password reset, you can safely ignore this email.")}
+      `,
     });
 
-    const emailContent = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
-   <h1 style="text-align: center; color: #111111; font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
-    ${process.env.AppName}
-  </h1>
-  
-  <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
-    <h2 style="color: #111111; text-align: center; font-size: 24px; font-weight: bold;">Hello ${name}!</h2>
-    <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6;">You are receiving this email because we received a password reset request for your account.</p>
-    
-    <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #111111; color: white; border-radius: 8px; font-size: 24px; font-weight: bold;">
-      <h3 style="margin: 0; color: #FFFFFF">Your OTP is: <strong>${otp}</strong></h3>
-    </div>
-    
-    <p style="text-align: center; color: #e10600; font-weight: bold; font-size: 14px; margin-top: 20px;">This OTP will expire in 3 minutes.</p>
-    <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">If you did not request a password reset, no further action is required.</p>
-    <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">Regards,<br></p>
-  </div>
-  
-  <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">If you're having trouble copying the OTP, please try again.</p>
-</div>
-
-
-    `;
-
-    const mailOptions = {
-      from: "nodemailerapptest@gmail.com",
+    await sendEmail({
       to: email,
       subject: "Reset Password OTP",
-      html: emailContent,
-    };
-
-    await transporter.sendMail(mailOptions);
+      html,
+    });
   } catch (error) {
     console.error(`Error sending OTP email to ${email}:`, error);
     throw new ApiError(500, "Unexpected error occurred during email sending.");
   }
 };
+
 export const sendManagerRequest = async (
   emails: string | string[],
   name: string,
   email: string,
 ): Promise<void> => {
   try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      secure: true,
-      auth: {
-        user: Nodemailer_GMAIL,
-        pass: Nodemailer_GMAIL_PASSWORD,
-      },
+    const html = buildEmailTemplate({
+      preheader: `New manager request from ${name}`,
+      greeting: "Hello Admin!",
+      body: `
+        ${emailHelpers.paragraph(
+          `A new manager request has been submitted by ${emailHelpers.highlight(name)} (${emailHelpers.highlight(email)}).`,
+        )}
+        ${emailHelpers.paragraph("Please review the request and take the appropriate action in the admin dashboard.")}
+        ${emailHelpers.ctaButton("Review Request", BRAND_URL)}
+      `,
+      footerNote:
+        "This is an automated notification. Please do not reply directly to this email.",
     });
 
-    const emailContent = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f2f9fc; padding: 30px 20px; border-radius: 10px;">
-  <h1 style="text-align: center; color: #111111; font-family: 'Times New Roman', Times, serif; font-size: 32px; letter-spacing: 2px;">
-    ${process.env.AppName}
-  </h1>
-  
-  <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
-    <h2 style="color: #111111; text-align: center; font-size: 24px; font-weight: bold;">Hello Admin!</h2>
- <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6;">
-      A new manager request has been submitted by <strong>${name}</strong> (<strong>${email}</strong>).
-    </p>
-  
-    <p style="font-size: 16px; color: #333; text-align: center; line-height: 1.6; margin-top: 20px;">
-      Please review the request and take the appropriate action.
-    </p>
-    <p style="font-size: 16px; color: #333; text-align: center; margin-top: 20px;">
-      Regards,<br>${process.env.AppName}
-    </p>
-  </div>
-  
-  <p style="font-size: 12px; color: #666; margin-top: 10px; text-align: center;">
-    This is an automated notification. Please do not reply directly to this email.
-  </p>
-</div>
-`;
-
-    const mailOptions = {
-      from: "nodemailerapptest@gmail.com",
+    await sendEmail({
       to: emails,
       subject: "New Manager Request Notification",
-      html: emailContent,
-    };
-
-    await transporter.sendMail(mailOptions);
+      html,
+    });
   } catch (error) {
     console.error(`Error sending manager request email to ${emails}:`, error);
     throw new ApiError(
@@ -389,6 +273,175 @@ export const sendManagerRequest = async (
       "Unexpected error occurred during sending manager request email.",
     );
   }
+};
+
+type ConvertPointsAdminEmailParams = {
+  userName: string;
+  userEmail: string;
+  amount: number;
+  walletAddress: string;
+  requestId: string;
+};
+
+export const sendConvertPointsAdminNotification = async (
+  adminEmails: string[],
+  {
+    userName,
+    userEmail,
+    amount,
+    walletAddress,
+    requestId,
+  }: ConvertPointsAdminEmailParams,
+): Promise<void> => {
+  if (adminEmails.length === 0) {
+    console.warn("No admin emails found for convert points notification.");
+    return;
+  }
+
+  const html = buildEmailTemplate({
+    preheader: `${userName} requested to convert ${amount} coins`,
+    greeting: "Hello Admin!",
+    body: `
+      ${emailHelpers.paragraph(
+        `${emailHelpers.highlight(userName)} has submitted a new coin conversion request. Please review the details below.`,
+      )}
+      ${emailHelpers.infoCard([
+        { label: "User email", value: userEmail },
+        { label: "Coins to convert", value: String(amount) },
+        { label: "Solana wallet", value: walletAddress },
+        { label: "Request ID", value: requestId },
+        { label: "Status", value: "Pending" },
+      ])}
+      ${emailHelpers.paragraph("Please process this request in the admin dashboard.")}
+      ${emailHelpers.ctaButton("Open Admin Dashboard", BRAND_URL)}
+    `,
+    footerNote:
+      "This is an automated notification. Please do not reply directly to this email.",
+  });
+
+  await sendEmail({
+    to: adminEmails,
+    subject: `New Coin Conversion Request — ${amount} coins`,
+    html,
+  });
+};
+
+type PointsAssignedEmailParams = {
+  name: string;
+  email: string;
+  assignedPoints: number;
+  previousPoints: number;
+  totalPoints: number;
+  reason?: string | null;
+};
+
+export const sendPointsAssignedEmail = async ({
+  name,
+  email,
+  assignedPoints,
+  previousPoints,
+  totalPoints,
+  reason,
+}: PointsAssignedEmailParams): Promise<void> => {
+  const reasonSection = reason?.trim()
+    ? emailHelpers.reasonBox(reason.trim())
+    : emailHelpers.paragraph(
+        "No additional reason was provided for this assignment.",
+      );
+
+  const html = buildEmailTemplate({
+    preheader: `Legacy Keeper awarded you ${assignedPoints} points`,
+    greeting: `Hello ${name}!`,
+    body: `
+      ${emailHelpers.paragraph(
+        `Great news! ${emailHelpers.highlight("Legacy Keeper")} has assigned new points to your account.`,
+      )}
+      ${emailHelpers.pointsBadge(assignedPoints)}
+      ${reasonSection}
+      ${emailHelpers.infoCard([
+        { label: "Previous balance", value: String(previousPoints) },
+        { label: "Points added", value: `+${assignedPoints}` },
+        { label: "New total balance", value: String(totalPoints) },
+      ])}
+      ${emailHelpers.paragraph("You can view your updated balance anytime in the Legacy Keeper app.")}
+      ${emailHelpers.ctaButton("View My Points", BRAND_URL)}
+    `,
+    footerNote:
+      "This is an automated notification about your Legacy Keeper rewards balance.",
+  });
+
+  await sendEmail({
+    to: email,
+    subject: `You've received ${assignedPoints} points from Legacy Keeper`,
+    html,
+  });
+};
+
+type ConvertPointsStatusEmailParams = {
+  name: string;
+  email: string;
+  status: "approved" | "rejected";
+  amount: number;
+  walletAddress: string;
+  requestId: string;
+};
+
+export const sendConvertPointsStatusEmail = async ({
+  name,
+  email,
+  status,
+  amount,
+  walletAddress,
+  requestId,
+}: ConvertPointsStatusEmailParams): Promise<void> => {
+  const isApproved = status === "approved";
+
+  const intro = isApproved
+    ? `Your coin conversion request has been ${emailHelpers.highlight("approved")} by Legacy Keeper. The requested points were reserved when you submitted this request and will now be processed for conversion.`
+    : `Your coin conversion request has been ${emailHelpers.highlight("rejected")} by Legacy Keeper. The ${amount} points reserved for this request have been ${emailHelpers.highlight("refunded")} back to your account.`;
+
+  const footerNote = isApproved
+    ? "If you have questions about your conversion, please contact Legacy Keeper support."
+    : "Your points balance has been restored. You may submit a new conversion request from the Legacy Keeper app.";
+
+  const html = buildEmailTemplate({
+    preheader: isApproved
+      ? `Your conversion request for ${amount} coins was approved`
+      : `Your conversion request for ${amount} coins was rejected`,
+    greeting: `Hello ${name}!`,
+    body: `
+      ${emailHelpers.paragraph(intro)}
+      ${emailHelpers.statusBadge(status)}
+      ${emailHelpers.infoCard([
+        { label: "Coins requested", value: String(amount) },
+        { label: "Solana wallet", value: walletAddress },
+        { label: "Request ID", value: requestId },
+        {
+          label: "Status",
+          value: isApproved ? "Approved" : "Rejected",
+        },
+      ])}
+      ${
+        isApproved
+          ? emailHelpers.paragraph(
+              "Your conversion is being processed. Please allow some time for the transfer to complete.",
+            )
+          : emailHelpers.paragraph(
+              "If you believe this was a mistake, please reach out to our support team.",
+            )
+      }
+      ${emailHelpers.ctaButton("Open Legacy Keeper", BRAND_URL)}
+    `,
+    footerNote,
+  });
+
+  await sendEmail({
+    to: email,
+    subject: isApproved
+      ? `Conversion approved — ${amount} coins`
+      : `Conversion request update — ${amount} coins`,
+    html,
+  });
 };
 
 export const verifyPassword = async (
@@ -409,6 +462,7 @@ export const hashPassword = async (password: string): Promise<string> => {
     throw new Error("Password hashing failed");
   }
 };
+
 export const generateOTP = (): string => {
   return crypto.randomInt(100000, 1000000).toString();
 };

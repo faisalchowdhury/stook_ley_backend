@@ -19,6 +19,7 @@ export const sendPushNotification = async (
       title: payload.title,
       body: payload.body,
     },
+    ...(payload.data && { data: payload.data }),
   };
   try {
     const response = await admin.messaging().send(message);
@@ -78,12 +79,34 @@ export const sendPushNotificationToMultiple = async (
     }
 
     // Create multicast message
+    const isDeathReport = payload.data?.type === "death_report";
     const message: admin.messaging.MulticastMessage = {
       tokens: validTokens,
       notification: {
         title: payload.title,
         body: payload.body,
       },
+      ...(payload.data && { data: payload.data }),
+      ...(isDeathReport && {
+        android: {
+          priority: "high",
+          notification: {
+            channelId: "death_reports",
+            priority: "high" as const,
+            sound: "default",
+          },
+        },
+        apns: {
+          headers: { "apns-priority": "10" },
+          payload: {
+            aps: {
+              alert: { title: payload.title, body: payload.body },
+              sound: "default",
+              contentAvailable: true,
+            },
+          },
+        },
+      }),
     };
 
     // Send batch using Firebase optimized method

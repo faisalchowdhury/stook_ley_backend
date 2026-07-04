@@ -14,6 +14,18 @@ router.get(
   KeeperController.getAssignedToMe,
 );
 
+router.get(
+  "/executor-access/:ownerUserId",
+  guardRole(["executor"]),
+  KeeperController.getExecutorAccess,
+);
+
+router.get(
+  "/executor-credentials",
+  guardRole(["executor"]),
+  KeeperController.getExecutorCredentials,
+);
+
 router.get("/:id", guardRole(["user"]), KeeperController.getSingleKeeper);
 
 router.patch("/update/:id", guardRole(["user"]), KeeperController.updateKeeper);

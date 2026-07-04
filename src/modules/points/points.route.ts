@@ -12,7 +12,7 @@ router.post(
 
 router.get(
   "/my-points",
-  guardRole(["user"]),
+  guardRole(["user" ,"executor" , "authorizer" , "admin"]),
   PointsController.getMyPoints,
 );
 
@@ -20,6 +20,19 @@ router.post(
   "/admin-assign",
   guardRole(["admin"]),
   PointsController.adminAssignPoints,
+);
+
+// alias: admin assign points to any user
+router.post(
+  "/admin/assign",
+  guardRole(["admin"]),
+  PointsController.adminAssignPoints,
+);
+
+router.get(
+  "/admin/users-with-points",
+  guardRole(["admin"]),
+  PointsController.getUsersWithPoints,
 );
 
 export const PointsRoutes = router;

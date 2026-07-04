@@ -34,6 +34,18 @@ const roleNotificationConfig = {
     readField: "isUserRead",
     msgField: "userMsg",
   },
+  executor: {
+    queryKey: "userId",
+    selectFields: "userMsg userMsgTittle status  createdAt updatedAt",
+    readField: "isUserRead",
+    msgField: "userMsg",
+  },
+  authorizer: {
+    queryKey: "userId",
+    selectFields: "userMsg userMsgTittle status  createdAt updatedAt",
+    readField: "isUserRead",
+    msgField: "userMsg",
+  },
 } as any;
 
 export const getMyNotification = catchAsync(
@@ -75,6 +87,7 @@ export const getMyNotification = catchAsync(
     });
     const formattedNotifications = notifications.map((notification) => ({
       _id: notification._id,
+      title: (notification as any).userMsgTittle || (notification as any).adminMsgTittle || "",
       isReadable: notification[readField] as boolean,
       msg: notification[msgField] as string,
       status: notification.status as string,

@@ -4,7 +4,7 @@ import { guardRole } from "../../middlewares/roleGuard";
 
 const router = express.Router();
 
-router.get("/", guardRole(["admin"]), RewardConfigController.getAll);
+router.get("/", guardRole(["admin" , "authorizer","executor","user"]), RewardConfigController.getAll);
 router.patch("/update/:id", guardRole(["admin"]), RewardConfigController.update);
 
 export const RewardConfigRoutes = router;

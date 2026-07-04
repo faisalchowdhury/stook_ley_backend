@@ -39,7 +39,15 @@ export const guardRole = (roles: TRole | TRole[]) => {
         roles === userRole
       ) {
         const user = (await UserModel.findOne({ _id: decoded.id })) as any;
-        if (!user.isVerified) {
+        if (!user) {
+          return sendResponse(res, {
+            statusCode: 404,
+            success: false,
+            message: "User not found",
+            data: null,
+          });
+        }
+        if (userRole === "user" && !user.isVerified) {
           return sendResponse(res, {
             statusCode: 400,
             success: false,

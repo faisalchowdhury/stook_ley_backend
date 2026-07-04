@@ -1,10 +1,14 @@
 import { IKeeper } from "./keeper.interface";
 import { KeeperModel } from "./keeper.model";
-import { sendAssignedNotify, hashPassword } from "../user/user.utils";
+import { sendAssignedNotify } from "../user/user.utils";
 import { UserModel } from "../user/user.model";
 import ApiError from "../../errors/ApiError";
 import httpStatus from "http-status";
 import mongoose from "mongoose";
+import {
+  encryptCredentialIfNeeded,
+  resolveStoredCredential,
+} from "../../utils/credentialEncryption";
 
 const assignKeeper = async (userId: string, payload: IKeeper) => {
   const user = await UserModel.findById(userId);
@@ -29,10 +33,10 @@ const assignKeeper = async (userId: string, payload: IKeeper) => {
   }
 
   if (payload.devicePassword) {
-    payload.devicePassword = await hashPassword(payload.devicePassword);
+    payload.devicePassword = encryptCredentialIfNeeded(payload.devicePassword);
   }
   if (payload.appPin) {
-    payload.appPin = await hashPassword(payload.appPin);
+    payload.appPin = encryptCredentialIfNeeded(payload.appPin);
   }
 
   const result = await KeeperModel.create({ ...payload, userId });
@@ -162,10 +166,10 @@ const updateKeeper = async (id: string, userId: string, payload: Partial<IKeeper
   }
 
   if (payload.devicePassword) {
-    payload.devicePassword = await hashPassword(payload.devicePassword);
+    payload.devicePassword = encryptCredentialIfNeeded(payload.devicePassword);
   }
   if (payload.appPin) {
-    payload.appPin = await hashPassword(payload.appPin);
+    payload.appPin = encryptCredentialIfNeeded(payload.appPin);
   }
 
   const result = await KeeperModel.findOneAndUpdate(
@@ -192,7 +196,7 @@ const deleteKeeper = async (id: string, userId: string) => {
 };
 
 const getAssignedToMe = async (userEmail: string) => {
-  return await KeeperModel.aggregate([
+  const assignments = await KeeperModel.aggregate([
     {
       $match: {
         email: userEmail,
@@ -212,7 +216,12 @@ const getAssignedToMe = async (userEmail: string) => {
     },
     {
       $project: {
-        role: 1, // My role for that user
+        role: 1,
+        fullName: 1,
+        relation: 1,
+        contactNumber: 1,
+        executorAccessReleasedAt: 1,
+        createdAt: 1,
         assignedByUser: {
           _id: 1,
           name: 1,
@@ -220,6 +229,8 @@ const getAssignedToMe = async (userEmail: string) => {
           phone: 1,
           profilePicture: 1,
           address: 1,
+          isDeath: 1,
+          deathReport: 1,
         },
       },
     },
@@ -227,6 +238,166 @@ const getAssignedToMe = async (userEmail: string) => {
       $sort: { createdAt: -1 },
     },
   ]);
+
+  return assignments.map((item) => {
+    const owner = item.assignedByUser;
+    const isPending = Boolean(owner?.deathReport?.isPending);
+    const isDeath = Boolean(owner?.isDeath);
+    const executorAccessReady = item.role === "executor" && isDeath;
+
+    return {
+      _id: item._id,
+      role: item.role,
+      fullName: item.fullName,
+      relation: item.relation,
+      contactNumber: item.contactNumber,
+      executorAccessReleasedAt: item.executorAccessReleasedAt || null,
+      assignedByUser: owner,
+      deathStatus: {
+        isDeath,
+        isPending,
+        safeMode: isDeath,
+        reportTime: owner?.deathReport?.reportTime || null,
+        status: isDeath
+          ? "deceased_locked"
+          : isPending
+            ? "death_pending"
+            : "active",
+        executorAccessReady,
+      },
+    };
+  });
+};
+
+const getExecutorCredentials = async (executorId: string) => {
+  const executor = await UserModel.findOne({
+    _id: executorId,
+    role: "executor",
+    isDeleted: false,
+  }).select("email");
+
+  if (!executor?.email) {
+    return null;
+  }
+
+  const emailPattern = new RegExp(
+    `^${executor.email.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+    "i",
+  );
+
+  const keeper = await KeeperModel.findOne({
+    role: "executor",
+    isDeleted: false,
+    email: emailPattern,
+  })
+    .sort({ createdAt: -1 })
+    .select("userId devicePassword appPin executorAccessReleasedAt");
+
+  if (!keeper) {
+    return null;
+  }
+
+  const owner = await UserModel.findOne({
+    _id: keeper.userId,
+    role: "user",
+    isDeath: true,
+    isDeleted: false,
+  }).select("_id name email isDeath");
+
+  if (!owner) {
+    return null;
+  }
+
+  const devicePassword = resolveStoredCredential(keeper.devicePassword);
+  const appPin = resolveStoredCredential(keeper.appPin);
+
+  if (!keeper.executorAccessReleasedAt) {
+    await KeeperModel.findByIdAndUpdate(keeper._id, {
+      executorAccessReleasedAt: new Date(),
+    });
+  }
+
+  return {
+    assignedByUser: {
+      _id: owner._id,
+      name: owner.name,
+      email: owner.email,
+      isDeath: owner.isDeath,
+    },
+    devicePassword: devicePassword ?? null,
+    appPin: appPin ?? null,
+  };
+};
+
+const getExecutorAccess = async (
+  ownerUserId: string,
+  executorEmail: string,
+) => {
+  const owner = await UserModel.findById(ownerUserId).select(
+    "name email phone isDeath deathReport",
+  );
+  if (!owner) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  if (!owner.isDeath) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Executor access is only available after the account has been confirmed deceased.",
+    );
+  }
+
+  const keeper = await KeeperModel.findOne({
+    userId: ownerUserId,
+    email: executorEmail,
+    role: "executor",
+    isDeleted: false,
+  });
+
+  if (!keeper) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "You are not assigned as an executor for this user.",
+    );
+  }
+
+  const devicePassword = resolveStoredCredential(keeper.devicePassword);
+  const appPin = resolveStoredCredential(keeper.appPin);
+
+  if (
+    keeper.devicePassword &&
+    !devicePassword &&
+    keeper.devicePassword.startsWith("enc:")
+  ) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Stored credentials cannot be retrieved. Please ask the account owner to re-assign the executor with updated device and app passwords.",
+    );
+  }
+
+  if (!keeper.executorAccessReleasedAt) {
+    await KeeperModel.findByIdAndUpdate(keeper._id, {
+      executorAccessReleasedAt: new Date(),
+    });
+  }
+
+  return {
+    message: `Log in to the device of ${owner.name} using the details below:`,
+    deceasedUser: {
+      _id: owner._id,
+      name: owner.name,
+      email: owner.email,
+      phone: owner.phone,
+    },
+    status: "ready_for_executor_access",
+    executorAccessReady: true,
+    credentials: {
+      devicePassword: devicePassword ?? null,
+      appPin: appPin ?? null,
+    },
+    credentialsAvailable: Boolean(devicePassword && appPin),
+    executorAccessReleasedAt: keeper.executorAccessReleasedAt || null,
+  };
 };
 
 export const KeeperService = {
@@ -236,4 +407,6 @@ export const KeeperService = {
   updateKeeper,
   deleteKeeper,
   getAssignedToMe,
+  getExecutorAccess,
+  getExecutorCredentials,
 };
