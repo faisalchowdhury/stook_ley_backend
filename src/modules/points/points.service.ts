@@ -2,6 +2,7 @@ import paginationBuilder from "../../utils/paginationBuilder";
 import { PointsModel } from "./points.model";
 import ApiError from "../../errors/ApiError";
 import httpStatus from "http-status";
+import { PipelineStage } from "mongoose";
 
 const updatePoints = async (userId: string, amount: number, action: "plus" | "minus") => {
   let pointsRecord = await PointsModel.findOne({ userId });
@@ -88,7 +89,7 @@ const getUsersWithPoints = async ({
   if (email) userMatch["user.email"] = { $regex: email, $options: "i" };
   if (role) userMatch["user.role"] = { $regex: role, $options: "i" };
 
-  const pipeline: Record<string, unknown>[] = [
+  const pipeline: PipelineStage[] = [
     { $match: { point: { $gt: 0 } } },
     {
       $lookup: {
