@@ -97,6 +97,28 @@ export const sendOTPEmailVerification = async (
   });
 };
 
+export const sendLoginOTPEmail = async (
+  name: string,
+  email: string,
+  otp: string,
+): Promise<void> => {
+  const html = buildEmailTemplate({
+    preheader: `Your login code is ${otp}`,
+    greeting: `Hello ${name}!`,
+    body: `
+      ${emailHelpers.paragraph("Use the code below to continue signing in to your account.")} 
+      ${emailHelpers.otpBlock(otp, "Login code")}
+      ${emailHelpers.paragraph("If you did not try to sign in, you can safely ignore this email.")} 
+    `,
+  });
+
+  await sendEmail({
+    to: email,
+    subject: "Login OTP",
+    html,
+  });
+};
+
 export const sendAssignedNotify = async (
   name: string,
   email: string,

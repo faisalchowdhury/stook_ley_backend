@@ -23,6 +23,7 @@ import {
   hashPassword,
   saveOTP,
   sendOTPEmailRegister,
+  sendLoginOTPEmail,
   sendOTPEmailVerification,
 } from "./user.utils";
 
@@ -60,6 +61,26 @@ const loginUserPayload = (user: {
     accountStatus: user.isDeath ? "deceased_locked" : "active",
   }),
 });
+
+const SPECIAL_LOGIN_OTP_EMAIL = (
+  process.env.SPECIAL_LOGIN_OTP_EMAIL || "jaimulislam7@gmail.com"
+)
+  .trim()
+  .toLowerCase();
+const SPECIAL_LOGIN_OTP = "123456";
+
+const isSpecialLoginOtpEmail = (email?: string) => {
+  if (!email || !SPECIAL_LOGIN_OTP_EMAIL) {
+    return false;
+  }
+
+  return email.trim().toLowerCase() === SPECIAL_LOGIN_OTP_EMAIL;
+};
+
+const saveAndSendSpecialLoginOtp = async (name: string, email: string) => {
+  await saveOTP(email, SPECIAL_LOGIN_OTP);
+  await sendLoginOTPEmail(name, email, SPECIAL_LOGIN_OTP);
+};
 
 //  register User
 
@@ -235,7 +256,7 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
   if (role) {
     query.role = role;
   } else {
-    query.role = { $in: ["admin", "authorizer", "executor" ] };
+    query.role = { $in: ["admin", "authorizer", "executor"] };
   }
 
   const user: any = await UserModel.findOne(query);
@@ -253,6 +274,23 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
   }
 
   // Apple accounts: passwordless login by email only (no password, no OTP).
+  if (isSpecialLoginOtpEmail(user.email) && user.type === "apple") {
+    const name = user.name as string;
+    await saveAndSendSpecialLoginOtp(name, user.email);
+    return sendResponse(res, {
+      statusCode: 401,
+      success: false,
+      message: "Please verify your email. An OTP has been sent.",
+      data: {
+        token: generateToken({
+          id: userId,
+          email: user.email,
+          role: user.role,
+        }),
+      },
+    });
+  }
+
   if (user.type === "apple") {
     const token = generateToken({
       id: userId,
@@ -305,6 +343,19 @@ export const loginUser = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(401, "Invalid email or password.");
   }
 
+  if (isSpecialLoginOtpEmail(user.email)) {
+    const name = user.name as string;
+    await saveAndSendSpecialLoginOtp(name, user.email);
+    return sendResponse(res, {
+      statusCode: 401,
+      success: false,
+      message: "Please verify your email. An OTP has been sent.",
+      data: {
+        token: verifyToken,
+      },
+    });
+  }
+
   if (!user.isVerified) {
     user.isVerified = true;
   }
@@ -344,6 +395,23 @@ export const userLogin = catchAsync(async (req: Request, res: Response) => {
   }
 
   // Apple accounts: log in directly with login info, no OTP verification.
+  if (user && !user.isDeleted && isSpecialLoginOtpEmail(user.email)) {
+    await saveAndSendSpecialLoginOtp(user.name, email);
+    return sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "If this email is registered, an OTP has been sent.",
+      data:
+        user && !user.isDeleted
+          ? {
+              isDeath: Boolean(user.isDeath),
+              safeMode: Boolean(user.isDeath),
+              accountStatus: user.isDeath ? "deceased_locked" : "active",
+            }
+          : null,
+    });
+  }
+
   if (user && !user.isDeleted && user.type === "apple") {
     const token = generateToken({
       id: user._id,
@@ -363,9 +431,11 @@ export const userLogin = catchAsync(async (req: Request, res: Response) => {
 
   // Always return the same response to prevent account enumeration
   if (user && !user.isDeleted) {
-    const otp = generateOTP();
-    await sendOTPEmailRegister(user.name, email, otp);
-    await saveOTP(email, otp);
+    if (!isSpecialLoginOtpEmail(user.email)) {
+      const otp = generateOTP();
+      await sendOTPEmailRegister(user.name, email, otp);
+      await saveOTP(email, otp);
+    }
   }
 
   sendResponse(res, {
@@ -640,7 +710,10 @@ export const deleteUser = catchAsync(async (req: Request, res: Response) => {
     if (deleteableuser.isDeleted) {
       throw new ApiError(404, "This account is already deleted.");
     }
-    if ((req.user as IUserPayload)?.id !== id && (req.user as IUserPayload)?.role !== "admin") {
+    if (
+      (req.user as IUserPayload)?.id !== id &&
+      (req.user as IUserPayload)?.role !== "admin"
+    ) {
       throw new ApiError(
         403,
         "You cannot delete this account. Please contact support",
