@@ -47,8 +47,12 @@ const sendEmail = async (options: {
       html: options.html,
       attachments: getEmailLogoAttachments(),
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Unexpected error:", error);
+    if (error && (error.code === "EENVELOPE" || error.responseCode === 550)) {
+      console.warn(`Email delivery skipped (recipient rejected or does not exist): ${options.to}`);
+      return; // Swallow recipient rejection errors so the API flows proceed normally
+    }
     throw new ApiError(500, "Unexpected error occurred during email sending.");
   }
 };

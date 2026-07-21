@@ -414,7 +414,11 @@ const sendResetPasswordSMS = async (to: string, otp: number): Promise<void> => {
 const finalizeDeathStatus = async (userId: string) => {
   const user = await UserModel.findById(userId);
   if (user && user.deathReport?.isPending) {
-    const reportTime = user.deathReport.reportTime!;
+    const reportTime = user.deathReport.reportTime;
+    if (!reportTime) {
+      console.warn(`Pending death report for user ${userId} has no reportTime.`);
+      return;
+    }
     const now = new Date();
     const hoursPassed = (now.getTime() - reportTime.getTime()) / (1000 * 60 * 60);
 

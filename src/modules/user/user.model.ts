@@ -7,7 +7,7 @@ import { string } from "zod";
 const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true },
-    phone: { type: String, required: true },
+    phone: { type: String, required: false },
     email: { type: String, required: true, index: true },
     address: { type: String },
 

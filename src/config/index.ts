@@ -37,7 +37,7 @@ export const PUBLIC_BASE_URL =
 export const EMAIL_LOGO_URL =
   process.env.EMAIL_LOGO_URL ||
   `${PUBLIC_BASE_URL.replace(/\/$/, "")}/images/logo.png`;
-export const BRAND_URL = process.env.dashboard_url || "https://legacy-keeper.app";
+export const BRAND_URL = "https://legacy-keeper.app";
 export const PRODUCT_PRICE_ID = process.env.PRODUCT_PRICE_ID || "";
 export const NODE_ENV = process.env.NODE_ENV;
 export const REDIS_HOST = "localhost";
