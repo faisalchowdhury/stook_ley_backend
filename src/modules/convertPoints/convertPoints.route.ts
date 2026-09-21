@@ -4,7 +4,7 @@ import { guardRole } from "../../middlewares/roleGuard";
 
 const router = express.Router();
 
-router.post("/", ConvertPointsController.create);
+router.post("/", guardRole(["user"]), ConvertPointsController.create);
 
 router.get(
   "/admin/requests",

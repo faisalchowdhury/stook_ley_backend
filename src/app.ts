@@ -10,10 +10,12 @@ import { template } from "./rootTemplate";
 import { PaymentController } from "./modules/payment/payment.controller";
 import { PaymentRoutes } from "./modules/payment/payment.route";
 import { CLIENT_URL } from "./config";
+import { noSqlInjectionGuard, securityHeaders } from "./middlewares/security";
 
 // Create an Express application
 const app: Application = express();
 app.use(logHttpRequests);
+app.use(securityHeaders);
 
 // Stripe webhook MUST receive the raw body for signature verification, so it
 // is registered BEFORE the global express.json() body parser below.
@@ -24,6 +26,7 @@ app.post(
 );
 
 app.use(express.json());
+app.use(noSqlInjectionGuard);
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 

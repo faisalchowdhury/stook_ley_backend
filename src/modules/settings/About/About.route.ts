@@ -6,6 +6,6 @@ import { createAbout, getAllAbout, updateAbout } from "./About.controller";
 const router = express.Router();
 router.post("/create", guardRole(["admin"]), createAbout);
 router.get("/", getAllAbout);
-router.patch("/update", updateAbout);
+router.patch("/update", guardRole(["admin"]), updateAbout);
 
 export const AboutRoutes = router;

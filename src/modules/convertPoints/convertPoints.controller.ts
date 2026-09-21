@@ -18,6 +18,14 @@ const create = catchAsync(async (req: Request, res: Response) => {
     );
   }
 
+  // ownership check to prevent IDOR (Insecure Direct Object Reference)
+  if ((req as any).user?.id !== userId) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "You are not authorized to convert points for another user",
+    );
+  }
+
   if (typeof amount !== "number" || amount <= 0) {
     throw new ApiError(httpStatus.BAD_REQUEST, "amount must be a positive number");
   }

@@ -6,6 +6,6 @@ import { createTerms, getAllTerms, updateTerms } from "./Terms.controller";
 const router = express.Router();
 router.post("/create", guardRole(["admin"]), createTerms);
 router.get("/", getAllTerms);
-router.patch("/update", updateTerms);
+router.patch("/update", guardRole(["admin"]), updateTerms);
 
 export const TermsRoutes = router;
